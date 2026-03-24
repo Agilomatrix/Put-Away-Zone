@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Spacer, Paragraph, PageBreak
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, PageBreak, Spacer
 from reportlab.lib.units import cm
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_CENTER
@@ -11,29 +11,25 @@ from reportlab.graphics.shapes import Drawing
 import re
 import tempfile
 
-# Define sticker dimensions
+# STICKER DIMENSIONS UPDATED
 STICKER_WIDTH = 10 * cm
-STICKER_HEIGHT = 15 * cm
+STICKER_HEIGHT = 7.5 * cm
 STICKER_PAGESIZE = (STICKER_WIDTH, STICKER_HEIGHT)
-CONTENT_BOX_WIDTH = 10 * cm
-CONTENT_BOX_HEIGHT = 10.0 * cm  # Increased to accommodate more fields
 
-# Styles
-bold_style = ParagraphStyle(name='Bold', fontName='Helvetica-Bold', fontSize=12, alignment=TA_CENTER)
-desc_style = ParagraphStyle(name='Desc', fontName='Helvetica', fontSize=10, alignment=TA_CENTER, leading=11)
-val_style = ParagraphStyle(name='Value', fontName='Helvetica-Bold', fontSize=14, alignment=TA_CENTER)
+# STYLES (Reduced font size to fit smaller sticker)
+bold_style = ParagraphStyle(name='Bold', fontName='Helvetica-Bold', fontSize=9, alignment=TA_CENTER, leading=10)
+desc_style = ParagraphStyle(name='Desc', fontName='Helvetica', fontSize=8, alignment=TA_CENTER, leading=9)
+val_style = ParagraphStyle(name='Value', fontName='Helvetica-Bold', fontSize=10, alignment=TA_CENTER, leading=10)
 
 def generate_barcode(data_string, width):
-    """Generate a Code128 barcode"""
+    """Generate a Code128 barcode scaled to fit"""
     try:
-        # Code128 can be wide, so we adjust barWidth to fit the box
-        bc = code128.Code128(data_string, barHeight=1.0*cm, barWidth=0.7)
+        bc = code128.Code128(data_string, barHeight=1.0*cm, barWidth=0.5)
         d = Drawing(width, 1.2*cm)
-        # Center the barcode in the drawing
         d.add(bc)
         return d
     except:
-        return Paragraph("Barcode Error", desc_style)
+        return Paragraph("Error", bold_style)
 
 def parse_location_string(location_str):
     location_parts = [''] * 4
@@ -43,24 +39,27 @@ def parse_location_string(location_str):
     return location_parts
 
 def generate_sticker_labels(df):
+    
     def draw_border(canvas, doc):
         canvas.saveState()
-        canvas.setLineWidth(1.8)
-        # Draw border around the content
-        canvas.rect(0.1*cm, STICKER_HEIGHT - 11.5*cm, STICKER_WIDTH - 0.2*cm, 11.3*cm)
+        canvas.setLineWidth(1.5)
+        # Draw border leaving tiny margin from edges
+        canvas.rect(0.2*cm, 0.2*cm, 9.6*cm, 7.1*cm)
         canvas.restoreState()
 
     temp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
     temp_pdf_path = temp_pdf.name
     
+    # Doc margins set to minimum
     doc = SimpleDocTemplate(temp_pdf_path, pagesize=STICKER_PAGESIZE,
-                          topMargin=0.5*cm, leftMargin=0.1*cm, rightMargin=0.1*cm)
+                          topMargin=0.4*cm, bottomMargin=0.4*cm, leftMargin=0.3*cm, rightMargin=0.3*cm)
 
     all_elements = []
-    cols = [c.upper() for c in df.columns]
+    content_w = 9.4*cm # Adjusted to fit inside
 
     for index, row in df.iterrows():
-        # Map columns (Flexible naming)
+        
+        # Column auto-detection
         grn_no = str(row.get(next((c for c in df.columns if 'GRN' in c.upper() and 'DATE' not in c.upper()), df.columns[0]), ""))
         grn_date = str(row.get(next((c for c in df.columns if 'DATE' in c.upper()), ""), ""))
         part_no = str(row.get(next((c for c in df.columns if 'PART' in c.upper()), ""), ""))
@@ -69,66 +68,60 @@ def generate_sticker_labels(df):
         loc_raw = str(row.get(next((c for c in df.columns if 'LOC' in c.upper()), ""), ""))
         
         loc_parts = parse_location_string(loc_raw)
-        
-        # Data for Barcode (Scans all fields)
         barcode_data = f"{grn_no}|{part_no}|{qty}|{loc_raw}"
-        
-        # TABLE STRUCTURE (To prevent overlapping)
-        content_w = STICKER_WIDTH - 0.4*cm
-        
-        # Create Store Location Sub-table
-        loc_table = Table([loc_parts], colWidths=[(content_w*0.66)/4]*4, rowHeights=[0.8*cm])
+
+        # Store Location table
+        loc_table = Table([loc_parts], colWidths=[(content_w*0.65)/4]*4, rowHeights=[0.7*cm])
         loc_table.setStyle(TableStyle([
-            ('GRID', (0,0), (-1,-1), 1, colors.black),
+            ('GRID', (0,0), (-1,-1), 0.8, colors.black),
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('FONTSIZE', (0,0), (-1,-1), 8),
         ]))
 
+        # Main Data Rows
         main_data = [
             ["GRN No", Paragraph(grn_no, val_style)],
             ["GRN Date", Paragraph(grn_date.split(' ')[0], val_style)],
             ["Part No", Paragraph(part_no, val_style)],
-            ["Description", Paragraph(desc[:60], desc_style)],
-            ["Quantity", Paragraph(qty, val_style)],
-            ["Store Location", loc_table],
-            ["Barcode", generate_barcode(barcode_data, content_w)]
+            ["Desc", Paragraph(desc[:45], desc_style)],
+            ["Qty", Paragraph(qty, val_style)],
+            ["Location", loc_table],
+            ["Barcode", generate_barcode(barcode_data, content_w*0.65)]
         ]
 
-        # Explicit Row Heights to ensure no overlap
-        row_h = [0.9*cm, 0.9*cm, 1.1*cm, 1.4*cm, 0.9*cm, 1.0*cm, 1.8*cm]
-        
-        t = Table(main_data, colWidths=[content_w*0.33, content_w*0.66], rowHeights=row_h)
+        # Compact Row heights to fit 7.5cm height
+        row_h = [0.7*cm, 0.7*cm, 0.7*cm, 1.1*cm, 0.7*cm, 0.8*cm, 1.3*cm]
+
+        t = Table(main_data, colWidths=[content_w*0.35, content_w*0.65], rowHeights=row_h)
         t.setStyle(TableStyle([
-            ('GRID', (0,0), (-1,-1), 1.2, colors.black),
-            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('GRID', (0,0), (-1,-1), 0.8, colors.black),
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
             ('FONTNAME', (0,0), (0,-1), 'Helvetica-Bold'),
-            ('SPAN', (1, 6), (1, 6)), # Barcode span
-            ('SPAN', (0, 6), (1, 6)), # Make barcode full width
+            ('FONTSIZE', (0,0), (0,-1), 8),
+            # Spanning Barcode across the bottom
+            ('SPAN', (1, 6), (1, 6)),
+            ('ALIGN', (1,6), (1,6), 'CENTER')
         ]))
 
         all_elements.append(t)
-        all_elements.append(PageBreak())
+        if index < len(df) - 1:
+            all_elements.append(PageBreak())
 
     doc.build(all_elements, onFirstPage=draw_border, onLaterPages=draw_border)
     return temp_pdf_path
 
-# Streamlit UI
 def main():
-    st.set_page_config(page_title="Warehouse Label Gen")
-    st.title("🏷️ Put Away Label Generator")
-    st.markdown("Developed by Agilomatrix")
+    st.set_page_config(page_title="Sticker Gen", page_icon="🏷️")
+    st.title("🏷️ Small Sticker Generator")
     
-    uploaded_file = st.file_uploader("Upload Excel/CSV", type=['xlsx', 'csv'])
-    
+    uploaded_file = st.file_uploader("Upload Data", type=['xlsx', 'csv'])
     if uploaded_file:
         df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
-        st.write("Preview:", df.head(3))
-        
-        if st.button("Generate Labels", type="primary"):
+        if st.button("Generate Sticker", type="primary"):
             pdf_path = generate_sticker_labels(df)
             with open(pdf_path, "rb") as f:
-                st.download_button("📥 Download PDF", f, file_name="warehouse_labels.pdf")
+                st.download_button("Download Labels", f, file_name="stickers.pdf")
             os.unlink(pdf_path)
 
 if __name__ == "__main__":
