@@ -7,7 +7,6 @@ from reportlab.lib.units import cm
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_CENTER
 from reportlab.graphics.barcode import code128
-from reportlab.pdfgen import canvas as rl_canvas
 import re
 import tempfile
 
@@ -18,74 +17,77 @@ except ImportError:
     st.stop()
 
 # ── Page dimensions ───────────────────────────────────────────────────────────
-STICKER_WIDTH  = 10.0 * cm
-STICKER_HEIGHT = 15.0 * cm
+STICKER_WIDTH    = 10.0 * cm
+STICKER_HEIGHT   = 15.0 * cm
 STICKER_PAGESIZE = (STICKER_WIDTH, STICKER_HEIGHT)
 
-# ── Content box ───────────────────────────────────────────────────────────────
-CONTENT_W = 9.6 * cm    # width of the content box
-CONTENT_H = 7.5 * cm    # height of the content box
+# ── Content box: 9.6 cm wide × 7.5 cm tall, centred on page ─────────────────
+CONTENT_W  = 9.6 * cm
+CONTENT_H  = 7.5 * cm
+H_OFFSET   = (STICKER_WIDTH - CONTENT_W) / 2   # 0.2 cm each side
+TOP_MARGIN = 0.2 * cm
 
-# Centre the content box horizontally on the page
-H_OFFSET  = (STICKER_WIDTH - CONTENT_W) / 2   # = 0.2 cm each side
-TOP_MARGIN = 0.2 * cm                           # gap from top of page to top of box
+# ── Column widths — label col + value col = CONTENT_W exactly ────────────────
+LABEL_W = CONTENT_W * 0.36          # ≈ 3.456 cm
+VALUE_W = CONTENT_W - LABEL_W       # ≈ 6.144 cm
 
-# ── Column widths inside the content box ─────────────────────────────────────
-LABEL_W = CONTENT_W * 0.36    # field-name column  (≈3.46 cm)
-VALUE_W = CONTENT_W - LABEL_W  # value column       (≈6.14 cm)
-
-# ── Row heights — must sum to CONTENT_H = 7.50 cm ────────────────────────────
-# GRN No.      0.85 cm
-# GRN Date     0.85 cm
-# Part No.     0.85 cm
-# Description  0.95 cm
-# Quantity     0.85 cm
-# Store Loc    0.85 cm
-# Barcode      2.30 cm
-# ─────────────────────────
-# Total        7.50 cm  ✓
-ROW_H      = 0.85 * cm
-DESC_ROW_H = 0.95 * cm
-LOC_ROW_H  = 0.85 * cm
-BC_ROW_H   = 2.30 * cm
-# Verify: 5*0.85 + 0.95 + 0.85 + 2.30 = 4.25+0.95+0.85+2.30 = 8.35 -- adjust
-# Recalc: 5 rows × 0.78 + desc 0.92 + loc 0.80 + bc 2.10 = 3.90+0.92+0.80+2.10=7.72 -- adjust
-# Precise: need exact 7.50
-# 5×ROW + DESC + LOC + BC = 7.50
-# Let ROW=0.76, DESC=0.88, LOC=0.78, BC=2.00
-# 5*0.76 + 0.88 + 0.78 + 2.00 = 3.80+0.88+0.78+2.00 = 7.46 close
-# Let ROW=0.76, DESC=0.88, LOC=0.78, BC=2.04
-# 3.80+0.88+0.78+2.04 = 7.50 ✓
+# ── Row heights — must sum EXACTLY to CONTENT_H = 7.50 cm ───────────────────
+# Row          Count   Height    Subtotal
+# GRN No.        1    0.76 cm   0.76
+# GRN Date       1    0.76 cm   0.76
+# Part No.       1    0.76 cm   0.76
+# Description    1    0.88 cm   0.88
+# Quantity       1    0.76 cm   0.76
+# Store Loc      1    0.78 cm   0.78
+# Barcode        1    2.80 cm   2.80
+# ─────────────────────────────────────
+# Total                         7.50 cm ✓
 ROW_H      = 0.76 * cm
 DESC_ROW_H = 0.88 * cm
 LOC_ROW_H  = 0.78 * cm
-BC_ROW_H   = 2.04 * cm
-# Double-check: 5*0.76=3.80, +0.88=4.68, +0.78=5.46, +2.04=7.50 ✓
+BC_ROW_H   = 2.80 * cm
+# Verify: 4*0.76 + 0.88 + 0.76 + 0.78 + 2.80
+#       = 3.04 + 0.88 + 0.76 + 0.78 + 2.80  -- wait, 5 standard rows
+# GRN No, GRN Date, Part No = 3 × 0.76 = 2.28
+# Description = 0.88
+# Quantity = 0.76
+# Store Loc = 0.78
+# Barcode = 2.80
+# Total = 2.28+0.88+0.76+0.78+2.80 = 7.50 ✓
 
 WHITE = colors.white
 BLACK = colors.black
-GREY  = colors.Color(0.91, 0.91, 0.91)
 
 # ── Paragraph styles ──────────────────────────────────────────────────────────
+# All label cells: bold, LEFT-aligned (same style for every row including Store Location)
 lbl_style = ParagraphStyle(
-    'Lbl', fontName='Helvetica-Bold', fontSize=9,
-    alignment=TA_LEFT, leading=11, leftIndent=4,
+    'Lbl',
+    fontName='Helvetica-Bold',
+    fontSize=9,
+    alignment=TA_LEFT,
+    leading=11,
+    leftIndent=4,
 )
 val_large = ParagraphStyle(
-    'ValLarge', fontName='Helvetica-Bold', fontSize=12,
-    alignment=TA_CENTER, leading=13,
+    'ValLarge',
+    fontName='Helvetica-Bold',
+    fontSize=12,
+    alignment=TA_CENTER,
+    leading=13,
 )
 val_bold = ParagraphStyle(
-    'ValBold', fontName='Helvetica-Bold', fontSize=10,
-    alignment=TA_CENTER, leading=11,
+    'ValBold',
+    fontName='Helvetica-Bold',
+    fontSize=10,
+    alignment=TA_CENTER,
+    leading=11,
 )
 val_normal = ParagraphStyle(
-    'ValNorm', fontName='Helvetica', fontSize=9,
-    alignment=TA_CENTER, leading=10,
-)
-loc_lbl_style = ParagraphStyle(
-    'LocLbl', fontName='Helvetica-Bold', fontSize=9,
-    alignment=TA_CENTER, leading=11,
+    'ValNorm',
+    fontName='Helvetica',
+    fontSize=9,
+    alignment=TA_CENTER,
+    leading=10,
 )
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -110,7 +112,7 @@ def clean_date(val):
 def generate_sticker_labels(df):
 
     def draw_border(canv, doc):
-        """Draw the outer border of the content box exactly."""
+        """Draw outer border exactly around the 9.6 × 7.5 cm content box."""
         canv.saveState()
         canv.setStrokeColor(BLACK)
         canv.setLineWidth(1.5)
@@ -119,7 +121,7 @@ def generate_sticker_labels(df):
         canv.rect(box_x, box_y, CONTENT_W, CONTENT_H)
         canv.restoreState()
 
-    # ── Normalise column names ─────────────────────────────────────────────────
+    # ── Normalise column names ────────────────────────────────────────────────
     df_copy = df.copy()
     df_copy.columns = [c.upper().strip() if isinstance(c, str) else c for c in df_copy.columns]
     cols = df_copy.columns.tolist()
@@ -132,19 +134,25 @@ def generate_sticker_labels(df):
                     return col
         return fallback
 
-    grn_no_col    = find_col(['GRN', 'NO'], ['GRN', 'NUM'], 'GRN',        fallback=cols[0])
-    grn_date_col  = find_col(['GRN', 'DATE'], ['RECEIPT', 'DATE'], 'DATE', fallback=None)
-    part_no_col   = find_col(['PART', 'NO'], ['PART', 'NUM'], 'PART',      fallback=cols[0])
-    desc_col      = find_col('DESC', 'NAME',                               fallback=cols[1] if len(cols) > 1 else cols[0])
-    qty_col       = find_col('QTY', 'QUANTITY',                            fallback=None)
-    store_loc_col = find_col(['STORE', 'LOC'], 'STORELOCATION', 'LOCATION', 'LOC',
+    # Detect columns — GRN No. checked first with multiple patterns
+    grn_no_col    = find_col(['GRN', 'NO'], ['GRN', 'NUM'], ['GRN', '#'],
+                              'GRNNO', 'GRN_NO', 'GRN',
+                              fallback=cols[0])
+    grn_date_col  = find_col(['GRN', 'DATE'], ['RECEIPT', 'DATE'],
+                              ['GRN', 'DT'], 'DATE',
+                              fallback=None)
+    part_no_col   = find_col(['PART', 'NO'], ['PART', 'NUM'], ['PART', '#'],
+                              'PARTNO', 'PART_NO', 'PART',
+                              fallback=cols[0])
+    desc_col      = find_col('DESC', 'DESCRIPTION', 'NAME',
+                              fallback=cols[1] if len(cols) > 1 else cols[0])
+    qty_col       = find_col('QTY', 'QUANTITY', 'QUAN',
+                              fallback=None)
+    store_loc_col = find_col(['STORE', 'LOC'], 'STORELOCATION', 'STORE_LOCATION',
+                              'LOCATION', 'LOC',
                               fallback=cols[2] if len(cols) > 2 else None)
 
-    # ── Document setup ────────────────────────────────────────────────────────
-    # The platypus flow area must sit inside the content box.
-    # leftMargin = H_OFFSET, rightMargin = H_OFFSET
-    # topMargin  = TOP_MARGIN
-    # bottomMargin = STICKER_HEIGHT - TOP_MARGIN - CONTENT_H
+    # ── Document: flow area sits exactly inside the content box ──────────────
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
     tmp_path = tmp.name
     tmp.close()
@@ -169,7 +177,11 @@ def generate_sticker_labels(df):
 
         def get(col):
             if col and col in row and pd.notna(row[col]):
-                return str(row[col])
+                v = str(row[col]).strip()
+                # strip trailing .0 for numeric-looking GRN/part numbers
+                if v.endswith('.0') and v[:-2].isdigit():
+                    v = v[:-2]
+                return v
             return ''
 
         grn_no    = get(grn_no_col)
@@ -182,21 +194,16 @@ def generate_sticker_labels(df):
 
         desc_display = desc[:52] + '…' if len(desc) > 55 else desc
 
-        # ─────────────────────────────────────────────────────────────────────
-        # Common table style: grid black, all white background, centred values
-        # Label column: bold left-aligned, white bg (NO grey)
-        # ─────────────────────────────────────────────────────────────────────
-        base_style = [
-            ('GRID',          (0, 0), (-1, -1), 1.0,  BLACK),
-            ('BACKGROUND',    (0, 0), (-1, -1), WHITE),
-            ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
-            ('LEFTPADDING',   (0, 0), (-1, -1), 3),
-            ('RIGHTPADDING',  (0, 0), (-1, -1), 3),
+        # ── Common cell padding ───────────────────────────────────────────────
+        pad = [
+            ('LEFTPADDING',   (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
             ('TOPPADDING',    (0, 0), (-1, -1), 1),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
         ]
 
         # ── Main 5-row table ──────────────────────────────────────────────────
+        # colWidths sum = LABEL_W + VALUE_W = CONTENT_W = 9.6 cm  ✓
         table_data = [
             [Paragraph("GRN No.",     lbl_style), Paragraph(grn_no,       val_large)],
             [Paragraph("GRN Date",    lbl_style), Paragraph(grn_date,      val_bold)],
@@ -209,13 +216,20 @@ def generate_sticker_labels(df):
             colWidths=[LABEL_W, VALUE_W],
             rowHeights=[ROW_H, ROW_H, ROW_H, DESC_ROW_H, ROW_H],
         )
-        main_table.setStyle(TableStyle(base_style))
+        main_table.setStyle(TableStyle([
+            ('GRID',       (0, 0), (-1, -1), 1.0, BLACK),
+            ('BACKGROUND', (0, 0), (-1, -1), WHITE),
+            ('VALIGN',     (0, 0), (-1, -1), 'MIDDLE'),
+        ] + pad))
 
         # ── Store Location row ────────────────────────────────────────────────
-        loc_inner_w = VALUE_W / 4
+        # The 4 inner boxes share VALUE_W exactly — no overflow possible
+        loc_box_w = VALUE_W / 4      # each of the 4 location boxes
+
+        # Build the 4-box inner table with colWidths summing to VALUE_W
         inner_table = Table(
             [loc_parts],
-            colWidths=[loc_inner_w] * 4,
+            colWidths=[loc_box_w] * 4,   # 4 × (VALUE_W/4) = VALUE_W  ✓
             rowHeights=[LOC_ROW_H],
         )
         inner_table.setStyle(TableStyle([
@@ -225,12 +239,16 @@ def generate_sticker_labels(df):
             ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
             ('FONTNAME',      (0, 0), (-1, -1), 'Helvetica-Bold'),
             ('FONTSIZE',      (0, 0), (-1, -1), 9),
+            ('LEFTPADDING',   (0, 0), (-1, -1), 2),
+            ('RIGHTPADDING',  (0, 0), (-1, -1), 2),
             ('TOPPADDING',    (0, 0), (-1, -1), 1),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
         ]))
 
+        # Outer loc row: label col (LABEL_W) + inner 4-box table (VALUE_W)
+        # Total = LABEL_W + VALUE_W = CONTENT_W = 9.6 cm  ✓ — never overflows
         loc_table = Table(
-            [[Paragraph("Store Location", loc_lbl_style), inner_table]],
+            [[Paragraph("Store Location", lbl_style), inner_table]],
             colWidths=[LABEL_W, VALUE_W],
             rowHeights=[LOC_ROW_H],
         )
@@ -238,21 +256,20 @@ def generate_sticker_labels(df):
             ('GRID',          (0, 0), (-1, -1), 1.0, BLACK),
             ('BACKGROUND',    (0, 0), (-1, -1), WHITE),
             ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
-            ('ALIGN',         (0, 0), (0,  0),  'CENTER'),
-            ('LEFTPADDING',   (0, 0), (-1, -1), 2),
-            ('RIGHTPADDING',  (0, 0), (-1, -1), 2),
+            ('LEFTPADDING',   (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
             ('TOPPADDING',    (0, 0), (-1, -1), 1),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
         ]))
 
-        # ── Barcode row (encodes GRN No.) ─────────────────────────────────────
+        # ── Barcode (encodes GRN No.) — width = CONTENT_W, no extra box ──────
         bc_data = grn_no if grn_no else (part_no if part_no else "NO-DATA")
 
-        # Scale barWidth so barcode fills available width nicely
+        # Scale barWidth to fit within CONTENT_W
         char_count = max(len(bc_data), 1)
-        target_w   = CONTENT_W - 0.6 * cm
+        target_w   = CONTENT_W - 0.8 * cm     # leave small quiet zone padding
         bar_w      = target_w / (char_count * 11 + 35 + 20)
-        bar_w      = max(0.6, min(bar_w, 1.6))
+        bar_w      = max(0.55, min(bar_w, 1.6))
 
         try:
             bc = code128.Code128(
@@ -268,21 +285,28 @@ def generate_sticker_labels(df):
             bc_cell = Paragraph(f"[BARCODE: {bc_data}]", val_normal)
             st.warning(f"Barcode error row {idx+1}: {e}")
 
+        # Single-cell table — colWidth = CONTENT_W so it exactly fills the box
+        # NO 'BOX' border here — the outer draw_border rect covers it already
+        # We just need top/bottom lines to separate from Store Location and close
         bc_table = Table(
             [[bc_cell]],
             colWidths=[CONTENT_W],
             rowHeights=[BC_ROW_H],
         )
         bc_table.setStyle(TableStyle([
-            ('BOX',           (0, 0), (-1, -1), 1.0, BLACK),
+            # Only top line (border between loc and barcode section)
+            # Left/right/bottom are the outer box drawn by draw_border
+            ('LINEABOVE',     (0, 0), (-1, 0),  1.0, BLACK),
             ('BACKGROUND',    (0, 0), (-1, -1), WHITE),
             ('ALIGN',         (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
-            ('TOPPADDING',    (0, 0), (-1, -1), 3),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('TOPPADDING',    (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('LEFTPADDING',   (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING',  (0, 0), (-1, -1), 0),
         ]))
 
-        # ── Assemble page ─────────────────────────────────────────────────────
+        # ── Assemble — NO extra Spacers, rows sum exactly to CONTENT_H ───────
         all_elements.extend([main_table, loc_table, bc_table])
         if idx < total_rows - 1:
             all_elements.append(PageBreak())
@@ -397,17 +421,18 @@ def main():
 4. Description
 5. Quantity
 6. Store Location (4-box grid)
-7. Barcode (Code-128, encodes GRN No.)
+7. Barcode (Code-128 — GRN No.)
 """)
 
         st.header("⚙️ Layout")
         st.markdown("""
 **Fixed configuration:**
 - Sticker page  : 10 × 15 cm
-- Content box   : 9.6 × 7.5 cm
-- All white background (no grey)
-- Barcode encodes GRN No.
-- Auto column detection
+- Content box   : 9.6 × 7.5 cm (centred)
+- All white background
+- Store Location: left-aligned label, 4 boxes fit within border
+- Barcode: Code-128 encoding GRN No.
+- No extra lines / overflow
 """)
 
 
