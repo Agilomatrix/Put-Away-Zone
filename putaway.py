@@ -66,7 +66,7 @@ RB = 2.55 * cm
 ROWS = [R, R, R, RD, R, RL, RB]  # top to bottom order: GRN No, Date, Part, Desc, Qty, Loc, BC
 
 # ── Font sizes ────────────────────────────────────────────────────────────────
-F_LABEL     = 9    # field name (left col)
+F_LABEL     = 11   # field name (left col)
 F_LARGE     = 13   # GRN No., Part No., Quantity value
 F_MEDIUM    = 11   # GRN Date value
 F_SMALL     = 9    # Description value
