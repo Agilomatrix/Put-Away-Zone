@@ -11,6 +11,13 @@ from reportlab.graphics.barcode import code128
 from reportlab.platypus import Paragraph
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_CENTER
+from io import BytesIO
+
+try:
+    import qrcode
+    HAS_QR = True
+except ImportError:
+    HAS_QR = False
 
 try:
     from PIL import Image as PILImage
@@ -31,7 +38,7 @@ BOX_X   = (PAGE_W - BOX_W) / 2   # 0.20 cm — left edge of box
 BOX_Y   = PAGE_H - 0.20*cm - BOX_H  # top of page minus small gap minus box height
 
 # ── Column split (same for EVERY row, including Store Location) ───────────────
-LABEL_W = BOX_W * 0.33          # 3.456 cm
+LABEL_W = BOX_W * 0.36          # 3.456 cm
 VALUE_W = BOX_W - LABEL_W       # 6.144 cm
 
 # ── Row heights — verified to sum exactly to BOX_H ───────────────────────────
@@ -66,7 +73,7 @@ RB = 2.55 * cm
 ROWS = [R, R, R, RD, R, RL, RB]  # top to bottom order: GRN No, Date, Part, Desc, Qty, Loc, BC
 
 # ── Font sizes ────────────────────────────────────────────────────────────────
-F_LABEL     = 12   # field name (left col)
+F_LABEL     = 9    # field name (left col)
 F_LARGE     = 13   # GRN No., Part No., Quantity value
 F_MEDIUM    = 11   # GRN Date value
 F_SMALL     = 9    # Description value
@@ -133,8 +140,11 @@ def draw_wrapped_centered(c, text, x, y, w, h, font_size):
 # DRAW ONE STICKER onto canvas  (draws at top of page every time)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def draw_sticker(c, grn_no, grn_date, part_no, desc, qty, loc_parts):
+def draw_sticker(c, grn_no, grn_date, part_no, desc_full, qty, loc_parts):
     """Draw the complete sticker content box on the current canvas page."""
+
+    # Truncated description for display only — QR uses full version
+    desc_display = desc_full[:52] + '…' if len(desc_full) > 55 else desc_full
 
     # ── Compute row Y positions (top → bottom) ────────────────────────────────
     # BOX_Y is the bottom of the box; top of box = BOX_Y + BOX_H
@@ -154,11 +164,11 @@ def draw_sticker(c, grn_no, grn_date, part_no, desc, qty, loc_parts):
 
     # ── Draw each row ─────────────────────────────────────────────────────────
     row_defs = [
-        (0, "GRN No.",     grn_no,   F_LARGE,  True),
-        (1, "GRN Date",    grn_date, F_MEDIUM, True),
-        (2, "Part No.",    part_no,  F_LARGE,  True),
-        (3, "Description", desc,     F_SMALL,  False),
-        (4, "Quantity",    qty,      F_LARGE,  True),
+        (0, "GRN No.",     grn_no,        F_LARGE,  True),
+        (1, "GRN Date",    grn_date,      F_MEDIUM, True),
+        (2, "Part No.",    part_no,       F_LARGE,  True),
+        (3, "Description", desc_display,  F_SMALL,  False),
+        (4, "Quantity",    qty,           F_LARGE,  True),
     ]
 
     c.setLineWidth(LW)
@@ -207,7 +217,7 @@ def draw_sticker(c, grn_no, grn_date, part_no, desc, qty, loc_parts):
         # Draw value
         draw_centered_text(c, part, lx, ry, loc_box_w, rh, None, F_LOC_VAL, bold=True)
 
-    # ── Barcode row (index 6) ─────────────────────────────────────────────────
+    # ── Barcode / QR row (index 6) ────────────────────────────────────────────
     ri  = 6
     ry  = row_tops[ri]
     rh  = ROWS[ri]
@@ -215,34 +225,75 @@ def draw_sticker(c, grn_no, grn_date, part_no, desc, qty, loc_parts):
     # Top border of barcode area
     c.line(BOX_X, ry + rh, BOX_X + BOX_W, ry + rh)
 
-    # Generate and draw barcode
-    bc_data = grn_no if grn_no else (part_no if part_no else "NO-DATA")
+    # Build full data string with ALL sticker fields
+    store_loc_str = ' | '.join([p for p in loc_parts if p])
+    full_data = (
+        f"GRN No: {grn_no} | "
+        f"GRN Date: {grn_date} | "
+        f"Part No: {part_no} | "
+        f"Description: {desc_full} | "
+        f"Quantity: {qty} | "
+        f"Store Location: {store_loc_str}"
+    )
 
-    # Fit barcode within BOX_W with padding
-    pad = 0.5 * cm
-    avail_w = BOX_W - 2 * pad
-    char_count = max(len(bc_data), 1)
-    bar_w = avail_w / (char_count * 11 + 35 + 20)
-    bar_w = max(0.55, min(bar_w, 1.8))
+    if HAS_QR:
+        # ── QR Code — encodes ALL fields, scannable by any QR reader ─────────
+        try:
+            qr = qrcode.QRCode(
+                version=None,
+                error_correction=qrcode.constants.ERROR_CORRECT_M,
+                box_size=10,
+                border=2,
+            )
+            qr.add_data(full_data)
+            qr.make(fit=True)
+            qr_img = qr.make_image(fill_color="black", back_color="white")
 
-    try:
-        bc = code128.Code128(
-            bc_data,
-            barWidth=bar_w,
-            barHeight=rh * 0.62,
-            humanReadable=True,
-            fontSize=F_BC_NUM,
-            fontName='Helvetica',
-        )
-        # Centre the barcode in the row
-        bc_w = bc.width
-        bc_x = BOX_X + (BOX_W - bc_w) / 2
-        bc_y = ry + (rh - bc.height) / 2
-        bc.drawOn(c, bc_x, bc_y)
-    except Exception as e:
-        c.setFont('Helvetica', 9)
-        c.drawCentredString(BOX_X + BOX_W / 2, ry + rh / 2, f"[BARCODE: {bc_data}]")
-        st.warning(f"Barcode draw error: {e}")
+            buf = BytesIO()
+            qr_img.save(buf, format='PNG')
+            buf.seek(0)
+
+            # Draw QR centred in the barcode row
+            qr_size = rh * 0.88          # QR square size (fits within row height)
+            qr_x = BOX_X + (BOX_W - qr_size) / 2
+            qr_y = ry + (rh - qr_size) / 2
+
+            from reportlab.lib.utils import ImageReader
+            c.drawImage(ImageReader(buf), qr_x, qr_y, width=qr_size, height=qr_size)
+
+            # Label below QR: show GRN No. for quick human reference
+            label_y = qr_y - 0.30 * cm
+            c.setFont('Helvetica', 7)
+            c.drawCentredString(BOX_X + BOX_W / 2, label_y, f"Scan for full details  |  GRN: {grn_no}")
+
+        except Exception as e:
+            st.warning(f"QR error row: {e}")
+            c.setFont('Helvetica', 8)
+            c.drawCentredString(BOX_X + BOX_W / 2, ry + rh / 2, f"[QR: {grn_no}]")
+    else:
+        # ── Fallback: Code128 barcode encoding GRN No. only ──────────────────
+        bc_data = grn_no if grn_no else (part_no if part_no else "NO-DATA")
+        pad = 0.5 * cm
+        avail_w = BOX_W - 2 * pad
+        char_count = max(len(bc_data), 1)
+        bar_w = avail_w / (char_count * 11 + 35 + 20)
+        bar_w = max(0.55, min(bar_w, 1.8))
+        try:
+            bc = code128.Code128(
+                bc_data,
+                barWidth=bar_w,
+                barHeight=rh * 0.60,
+                humanReadable=True,
+                fontSize=F_BC_NUM,
+                fontName='Helvetica',
+            )
+            bc_x = BOX_X + (BOX_W - bc.width) / 2
+            bc_y = ry + (rh - bc.height) / 2
+            bc.drawOn(c, bc_x, bc_y)
+        except Exception as e:
+            c.setFont('Helvetica', 9)
+            c.drawCentredString(BOX_X + BOX_W / 2, ry + rh / 2, f"[BARCODE: {bc_data}]")
+            st.warning(f"Barcode error: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -426,7 +477,9 @@ def main():
 - Content box   : 9.6 × 7.5 cm
 - All white background
 - Pure canvas drawing — no overflow possible
-- Barcode: Code-128, encodes GRN No.
+- QR Code encodes ALL fields:
+  GRN No, GRN Date, Part No,
+  Description, Quantity, Store Location
 """)
 
 
