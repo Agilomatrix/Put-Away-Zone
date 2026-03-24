@@ -59,9 +59,9 @@ def parse_location(loc_str):
     parts = ['', '', '', '']
     if not loc_str or not isinstance(loc_str, str):
         return parts
-    matches = re.findall(r'([^_\s]+)', loc_str.strip())
-    for i, m in enumerate(matches[:4]):
-        parts[i] = m
+    segments = loc_str.strip().split('-')
+    for i, s in enumerate(segments[:4]):
+        parts[i] = s.strip()
     return parts
 
 def clean_date(val):
