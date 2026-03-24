@@ -31,7 +31,7 @@ BOX_X   = (PAGE_W - BOX_W) / 2   # 0.20 cm — left edge of box
 BOX_Y   = PAGE_H - 0.20*cm - BOX_H  # top of page minus small gap minus box height
 
 # ── Column split (same for EVERY row, including Store Location) ───────────────
-LABEL_W = BOX_W * 0.36          # 3.456 cm
+LABEL_W = BOX_W * 0.33          # 3.456 cm
 VALUE_W = BOX_W - LABEL_W       # 6.144 cm
 
 # ── Row heights — verified to sum exactly to BOX_H ───────────────────────────
