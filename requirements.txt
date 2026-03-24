@@ -1,8 +1,5 @@
 streamlit
 pandas
-numpy
-reportlab
+fpdf2
 Pillow
-qrcode[pil]
 openpyxl
-xlrd
