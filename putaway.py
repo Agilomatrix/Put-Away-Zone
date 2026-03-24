@@ -25,55 +25,33 @@ PAGE_W  = 10.0 * cm
 PAGE_H  = 15.0 * cm
 
 BOX_W   = 9.6  * cm   # content box width
-BOX_H   = 7.5  * cm   # content box height  (ALL rows must fit inside)
+BOX_H   = 7.5  * cm   # content box height
 
-BOX_X   = (PAGE_W - BOX_W) / 2   # 0.20 cm — left edge of box
-BOX_Y   = PAGE_H - 0.20*cm - BOX_H  # top of page minus small gap minus box height
+BOX_X   = (PAGE_W - BOX_W) / 2
+BOX_Y   = PAGE_H - 0.20*cm - BOX_H
 
-# ── Column split (same for EVERY row, including Store Location) ───────────────
-LABEL_W = BOX_W * 0.33          # 3.456 cm
-VALUE_W = BOX_W - LABEL_W       # 6.144 cm
+# ── Column split ──────────────────────────────────────────────────────────────
+LABEL_W = BOX_W * 0.33
+VALUE_W = BOX_W - LABEL_W
 
-# ── Row heights — verified to sum exactly to BOX_H ───────────────────────────
-#   GRN No.        0.80 cm
-#   GRN Date       0.80 cm
-#   Part No.       0.80 cm
-#   Description    0.95 cm
-#   Quantity       0.80 cm
-#   Store Loc      0.80 cm
-#   Barcode        2.55 cm
-#   ───────────────────────
-#   Total          7.50 cm  ✓
-R  = 0.80 * cm   # standard row height
-RD = 0.95 * cm   # description row
-RL = 0.80 * cm   # store location row
-RB = 2.55 * cm   # barcode row
-# Check: 5*R + RD + RL + RB = 4.00+0.95+0.80+2.55 = 8.30  ← wrong, recount
-# Rows: GRN No, GRN Date, Part No = 3 standard rows
-#       Description = 1 desc row
-#       Quantity = 1 standard row
-#       Store Loc = 1 loc row
-#       Barcode = 1 barcode row
-# = 4*R + RD + RL + RB
-# = 4*0.80 + 0.95 + 0.80 + 2.55
-# = 3.20 + 0.95 + 0.80 + 2.55 = 7.50 ✓
+# ── Row heights (4*R + RD + RL + RB = 3.20+0.95+0.80+2.55 = 7.50 ✓) ─────────
 R  = 0.80 * cm
 RD = 0.95 * cm
 RL = 0.80 * cm
 RB = 2.55 * cm
-# Final verification: 4*0.80 + 0.95 + 0.80 + 2.55 = 3.20+0.95+0.80+2.55 = 7.50 ✓
 
-ROWS = [R, R, R, RD, R, RL, RB]  # top to bottom order: GRN No, Date, Part, Desc, Qty, Loc, BC
+ROWS = [R, R, R, RD, R, RL, RB]  # GRN No, Date, Part, Desc, Qty, Loc, BC
 
 # ── Font sizes ────────────────────────────────────────────────────────────────
-F_LABEL     = 12   # field name (left col)
-F_LARGE     = 13   # GRN No., Part No., Quantity value
-F_MEDIUM    = 11   # GRN Date value
-F_SMALL     = 9    # Description value
-F_LOC_VAL   = 10   # location box values
-F_BC_NUM    = 8    # barcode human-readable number
+F_LABEL   = 12
+F_LARGE   = 13
+F_MEDIUM  = 11
+F_SMALL   = 9
+F_LOC_VAL = 10
+F_BC_NUM  = 8
 
-LW = 1.0   # line width for grid
+LW = 1.0
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -91,64 +69,55 @@ def clean_date(val):
     return s.split(' ')[0] if ' ' in s else s
 
 def clean_num(val):
-    """Strip trailing .0 from floats read as strings."""
     if val.endswith('.0') and val[:-2].isdigit():
         return val[:-2]
     return val
 
 def draw_centered_text(c, text, x, y, w, h, font, size, bold=False):
-    """Draw text centred both horizontally and vertically in a cell."""
     fname = 'Helvetica-Bold' if bold else 'Helvetica'
     c.setFont(fname, size)
-    # Truncate if too wide
     while c.stringWidth(text, fname, size) > w - 6 and size > 6:
         size -= 0.5
         c.setFont(fname, size)
     text_w = c.stringWidth(text, fname, size)
     tx = x + (w - text_w) / 2
-    ty = y + (h - size * 0.35) / 2   # approximate vertical centre
+    ty = y + (h - size * 0.35) / 2
     c.drawString(tx, ty, text)
 
 def draw_left_text(c, text, x, y, w, h, font_size, bold=True):
-    """Draw text left-aligned, vertically centred in a cell."""
     fname = 'Helvetica-Bold' if bold else 'Helvetica'
     c.setFont(fname, font_size)
     ty = y + (h - font_size * 0.35) / 2
     c.drawString(x + 4, ty, text)
 
 def draw_wrapped_centered(c, text, x, y, w, h, font_size):
-    """Draw wrapped text centred in cell (for Description)."""
-    from reportlab.lib.styles import ParagraphStyle
-    from reportlab.lib.enums import TA_CENTER
-    from reportlab.platypus import Paragraph
     style = ParagraphStyle('tmp', fontName='Helvetica', fontSize=font_size,
                            alignment=TA_CENTER, leading=font_size + 2)
     p = Paragraph(text, style)
     pw, ph = p.wrap(w - 8, h)
-    # Centre vertically
     py = y + (h - ph) / 2
     p.drawOn(c, x + 4, py)
 
+
 # ═══════════════════════════════════════════════════════════════════════════════
-# DRAW ONE STICKER onto canvas  (draws at top of page every time)
+# DRAW ONE STICKER
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def draw_sticker(c, grn_no, grn_date, part_no, desc, qty, loc_parts):
-    """Draw the complete sticker content box on the current canvas page."""
+def draw_sticker(c, grn_no, grn_date, part_no, desc, qty, loc_parts, store_loc_raw):
+    """Draw sticker. Barcode encodes the raw store location string."""
 
-    # ── Compute row Y positions ───────────────────────────────────────────────
     row_tops = []
-    y = BOX_Y + BOX_H   
+    y = BOX_Y + BOX_H
     for rh in ROWS:
         y -= rh
-        row_tops.append(y)   
+        row_tops.append(y)
 
-    # ── Draw outer border ─────────────────────────────────────────────────────
+    # Outer border
     c.setStrokeColor(colors.black)
     c.setLineWidth(1.5)
     c.rect(BOX_X, BOX_Y, BOX_W, BOX_H)
 
-    # ── Draw each row (0 to 4) ────────────────────────────────────────────────
+    # ── Rows 0-4 (GRN No, Date, Part No, Desc, Qty) ───────────────────────────
     row_defs = [
         (0, "GRN No.",     grn_no,   F_LARGE,  True),
         (1, "GRN Date",    grn_date, F_MEDIUM, True),
@@ -158,106 +127,140 @@ def draw_sticker(c, grn_no, grn_date, part_no, desc, qty, loc_parts):
     ]
 
     c.setLineWidth(LW)
+
     for ri, label, value, vsize, vbold in row_defs:
-        ry  = row_tops[ri]
-        rh  = ROWS[ri]
+        ry = row_tops[ri]
+        rh = ROWS[ri]
+
         if ri > 0:
             c.line(BOX_X, ry + rh, BOX_X + BOX_W, ry + rh)
+
         c.line(BOX_X + LABEL_W, ry, BOX_X + LABEL_W, ry + rh)
+
         draw_left_text(c, label, BOX_X, ry, LABEL_W, rh, F_LABEL, bold=True)
+
         if ri == 3:
             draw_wrapped_centered(c, value, BOX_X + LABEL_W, ry, VALUE_W, rh, vsize)
         else:
             draw_centered_text(c, value, BOX_X + LABEL_W, ry, VALUE_W, rh, None, vsize, bold=vbold)
 
     # ── Store Location row (index 5) ──────────────────────────────────────────
-    ri, ry, rh = 5, row_tops[5], ROWS[5]
+    ri  = 5
+    ry  = row_tops[ri]
+    rh  = ROWS[ri]
+
     c.line(BOX_X, ry + rh, BOX_X + BOX_W, ry + rh)
     c.line(BOX_X + LABEL_W, ry, BOX_X + LABEL_W, ry + rh)
+
     draw_left_text(c, "Store Location", BOX_X, ry, LABEL_W, rh, F_LABEL, bold=True)
+
     loc_box_w = VALUE_W / 4
     for i, part in enumerate(loc_parts):
         lx = BOX_X + LABEL_W + i * loc_box_w
-        if i > 0: c.line(lx, ry, lx, ry + rh)
+        if i > 0:
+            c.line(lx, ry, lx, ry + rh)
         draw_centered_text(c, part, lx, ry, loc_box_w, rh, None, F_LOC_VAL, bold=True)
 
-    # ── Barcode row (index 6) ── SCAN ALL FIELDS ──────────────────────────────
-    ri, ry, rh = 6, row_tops[6], ROWS[6]
+    # ── Barcode row (index 6) — encodes Store Location ────────────────────────
+    ri  = 6
+    ry  = row_tops[ri]
+    rh  = ROWS[ri]
+
     c.line(BOX_X, ry + rh, BOX_X + BOX_W, ry + rh)
 
-    # Create the Combined Data String for the Barcode
-    # Format: GRN|Date|Part|Desc|Qty|Loc
-    loc_combined = "-".join([p for p in loc_parts if p.strip()])
-    # We truncate Description to 15 chars in the barcode to keep the barcode width scan-able
-    bc_data = f"{grn_no}|{grn_date}|{part_no}|{desc[:15]}|{qty}|{loc_combined}"
-    
-    # Filter out characters that Code128 might struggle with in basic scanners
-    bc_data = re.sub(r'[^a-zA-Z0-9|.-]', ' ', bc_data)
+    # Use raw store location for barcode; fall back to part_no then grn_no
+    bc_data = store_loc_raw.strip() if store_loc_raw and store_loc_raw.strip() else \
+              (part_no if part_no else (grn_no if grn_no else "NO-DATA"))
+
+    pad     = 0.5 * cm
+    avail_w = BOX_W - 2 * pad
+    char_count = max(len(bc_data), 1)
+    bar_w = avail_w / (char_count * 11 + 35 + 20)
+    bar_w = max(0.55, min(bar_w, 1.8))
 
     try:
-        # Dynamic bar width calculation to ensure it fits 9.6cm
-        # Code 128 uses roughly 11 modules per character + overhead
-        char_len = len(bc_data)
-        # Calculate bar width: available width (9.6cm - padding) / modules
-        # A character in Code128 is 11 modules wide. 
-        # Total modules approx = (chars * 11) + 35
-        estimated_modules = (char_len * 11) + 35
-        avail_points = (BOX_W - 0.6*cm) # 9.6cm minus some padding
-        calculated_bar_w = avail_points / estimated_modules
-        
-        # Ensure bar_w is within scannable limits (usually 0.4 to 1.2)
-        final_bar_w = max(0.42, min(calculated_bar_w, 1.2))
-
         bc = code128.Code128(
             bc_data,
-            barWidth=final_bar_w,
-            barHeight=rh * 0.60,
-            humanReadable=True, # Shows the text below the bars
+            barWidth=bar_w,
+            barHeight=rh * 0.62,
+            humanReadable=True,
             fontSize=F_BC_NUM,
             fontName='Helvetica',
         )
-        
-        # Center the barcode
-        bc_x = BOX_X + (BOX_W - bc.width) / 2
+        bc_w = bc.width
+        bc_x = BOX_X + (BOX_W - bc_w) / 2
         bc_y = ry + (rh - bc.height) / 2
         bc.drawOn(c, bc_x, bc_y)
-        
     except Exception as e:
-        c.setFont('Helvetica', 8)
-        c.drawCentredString(BOX_X + BOX_W / 2, ry + rh / 2, f"Error: {str(e)[:40]}")
+        c.setFont('Helvetica', 9)
+        c.drawCentredString(BOX_X + BOX_W / 2, ry + rh / 2, f"[BARCODE: {bc_data}]")
+        st.warning(f"Barcode draw error: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COLUMN FINDER HELPER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def find_col(cols, *kw_groups, fallback=None):
+    for kwg in kw_groups:
+        kwg = [kwg] if isinstance(kwg, str) else list(kwg)
+        for col in cols:
+            if all(k in col for k in kwg):
+                return col
+    return fallback
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAIN GENERATOR
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def generate_sticker_labels(df):
-    # ── Normalise columns ─────────────────────────────────────────────────────
-    df_copy = df.copy()
-    df_copy.columns = [col.upper().strip() if isinstance(col, str) else col
-                       for col in df_copy.columns]
-    cols = df_copy.columns.tolist()
+def generate_sticker_labels(df_grn, df_loc):
+    """
+    df_grn  — File 1: GRN Date, GRN No, Part No, Description, Quantity
+    df_loc  — File 2: Part No, Part Description, Store Location
+    Merge on Part No, then generate one sticker per row of df_grn.
+    """
 
-    def find_col(*kw_groups, fallback=None):
-        for kwg in kw_groups:
-            kwg = [kwg] if isinstance(kwg, str) else list(kwg)
-            for col in cols:
-                if all(k in col for k in kwg):
-                    return col
-        return fallback
+    # ── Normalise column names ────────────────────────────────────────────────
+    def norm_cols(df):
+        df = df.copy()
+        df.columns = [c.upper().strip() if isinstance(c, str) else c for c in df.columns]
+        return df
 
-    grn_no_col    = find_col(['GRN','NO'], ['GRN','NUM'], ['GRN','#'],
-                              'GRNNO', 'GRN_NO', 'GRN', fallback=cols[0])
-    grn_date_col  = find_col(['GRN','DATE'], ['RECEIPT','DATE'], ['GRN','DT'], 'DATE',
-                              fallback=None)
-    part_no_col   = find_col(['PART','NO'], ['PART','NUM'], ['PART','#'],
-                              'PARTNO', 'PART_NO', 'PART', fallback=cols[0])
-    desc_col      = find_col('DESC', 'DESCRIPTION', 'NAME',
-                              fallback=cols[1] if len(cols) > 1 else cols[0])
-    qty_col       = find_col('QTY', 'QUANTITY', fallback=None)
-    store_loc_col = find_col(['STORE','LOC'], 'STORELOCATION', 'STORE_LOCATION',
-                              'LOCATION', 'LOC',
-                              fallback=cols[2] if len(cols) > 2 else None)
+    df_grn = norm_cols(df_grn)
+    df_loc = norm_cols(df_loc)
+
+    g_cols = df_grn.columns.tolist()
+    l_cols = df_loc.columns.tolist()
+
+    # File 1 columns
+    grn_no_col   = find_col(g_cols, ['GRN','NO'], ['GRN','NUM'], ['GRN','#'],
+                             'GRNNO', 'GRN_NO', 'GRN', fallback=g_cols[0])
+    grn_date_col = find_col(g_cols, ['GRN','DATE'], ['RECEIPT','DATE'],
+                             ['GRN','DT'], 'DATE', fallback=None)
+    part_no_col1 = find_col(g_cols, ['PART','NO'], ['PART','NUM'], ['PART','#'],
+                             'PARTNO', 'PART_NO', 'PART', fallback=g_cols[0])
+    desc_col1    = find_col(g_cols, 'DESC', 'DESCRIPTION', 'NAME',
+                             fallback=g_cols[1] if len(g_cols) > 1 else g_cols[0])
+    qty_col      = find_col(g_cols, 'QTY', 'QUANTITY', fallback=None)
+
+    # File 2 columns
+    part_no_col2  = find_col(l_cols, ['PART','NO'], ['PART','NUM'], ['PART','#'],
+                              'PARTNO', 'PART_NO', 'PART', fallback=l_cols[0])
+    store_loc_col = find_col(l_cols, ['STORE','LOC'], 'STORELOCATION',
+                              'STORE_LOCATION', 'LOCATION', 'LOC',
+                              fallback=l_cols[-1] if l_cols else None)
+
+    # ── Build lookup: part_no → store_location ────────────────────────────────
+    loc_lookup = {}
+    if store_loc_col:
+        for _, row in df_loc.iterrows():
+            pn = str(row[part_no_col2]).strip() if pd.notna(row[part_no_col2]) else ''
+            sl = str(row[store_loc_col]).strip() if pd.notna(row[store_loc_col]) else ''
+            if pn:
+                loc_lookup[pn] = sl
+                loc_lookup[pn.upper()] = sl
+                loc_lookup[pn.lower()] = sl
 
     # ── Create PDF ────────────────────────────────────────────────────────────
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
@@ -268,28 +271,34 @@ def generate_sticker_labels(df):
 
     progress_bar = st.progress(0)
     status_ph    = st.empty()
-    total_rows   = len(df_copy)
+    total_rows   = len(df_grn)
 
-    for idx, (_, row) in enumerate(df_copy.iterrows()):
+    def get(row, col):
+        if col and col in row and pd.notna(row[col]):
+            v = str(row[col]).strip()
+            return clean_num(v)
+        return ''
+
+    for idx, (_, row) in enumerate(df_grn.iterrows()):
         progress_bar.progress((idx + 1) / total_rows)
-        status_ph.text(f"Creating sticker {idx+1} of {total_rows} ({int((idx+1)/total_rows*100)}%)")
+        status_ph.text(f"Creating sticker {idx+1} of {total_rows} "
+                       f"({int((idx+1)/total_rows*100)}%)")
 
-        def get(col):
-            if col and col in row and pd.notna(row[col]):
-                v = str(row[col]).strip()
-                return clean_num(v)
-            return ''
+        grn_no   = get(row, grn_no_col)
+        grn_date = clean_date(get(row, grn_date_col)) if grn_date_col else ''
+        part_no  = get(row, part_no_col1)
+        desc     = get(row, desc_col1)
+        qty      = get(row, qty_col) if qty_col else ''
 
-        grn_no    = get(grn_no_col)
-        grn_date  = clean_date(get(grn_date_col)) if grn_date_col else ''
-        part_no   = get(part_no_col)
-        desc      = get(desc_col)
-        qty       = get(qty_col) if qty_col else ''
-        store_loc = get(store_loc_col) if store_loc_col else ''
-        loc_parts = parse_location(store_loc)
+        # Look up store location from File 2 by matching Part No
+        store_loc_raw = (loc_lookup.get(part_no)
+                         or loc_lookup.get(part_no.upper())
+                         or loc_lookup.get(part_no.lower())
+                         or '')
+        loc_parts = parse_location(store_loc_raw)
 
-        draw_sticker(c, grn_no, grn_date, part_no, desc, qty, loc_parts)
-        c.showPage()   # new page for next sticker
+        draw_sticker(c, grn_no, grn_date, part_no, desc, qty, loc_parts, store_loc_raw)
+        c.showPage()
 
     c.save()
     status_ph.text("PDF generated successfully!")
@@ -318,77 +327,111 @@ def main():
     col1, col2 = st.columns([2, 1])
 
     with col1:
-        st.header("📁 Upload File")
-        uploaded_file = st.file_uploader(
-            "Choose an Excel or CSV file",
+        st.header("📁 Upload Files")
+
+        st.subheader("File 1 — GRN Data")
+        file1 = st.file_uploader(
+            "Upload GRN file (Excel / CSV)  ·  columns: GRN No, GRN Date, Part No, Description, Quantity",
             type=['xlsx', 'xls', 'csv'],
-            help="Upload your data file containing GRN information",
+            key="file1",
         )
 
-        if uploaded_file is not None:
+        st.subheader("File 2 — Store Location Master")
+        file2 = st.file_uploader(
+            "Upload Location file (Excel / CSV)  ·  columns: Part No, Part Description, Store Location",
+            type=['xlsx', 'xls', 'csv'],
+            key="file2",
+        )
+
+        df_grn = None
+        df_loc = None
+
+        if file1:
             try:
-                df = (pd.read_csv(uploaded_file)
-                      if uploaded_file.name.lower().endswith('.csv')
-                      else pd.read_excel(uploaded_file))
-
-                st.success(f"✅ File loaded! {len(df)} rows × {len(df.columns)} columns.")
-                st.subheader("📊 Data Preview")
-                st.write(f"**Columns:** {', '.join(df.columns.tolist())}")
-                st.dataframe(df.head(), use_container_width=True)
-
-                st.subheader("🎯 Generate Labels")
-                if st.button("🚀 Generate Sticker Labels", type="primary", use_container_width=True):
-                    with st.spinner("Generating sticker labels…"):
-                        pdf_path = generate_sticker_labels(df)
-
-                    if pdf_path:
-                        st.success("🎉 Sticker labels generated successfully!")
-                        with open(pdf_path, "rb") as f:
-                            pdf_bytes = f.read()
-
-                        filename = f"{uploaded_file.name.rsplit('.', 1)[0]}_sticker_labels.pdf"
-                        st.markdown("""
-                        <div style="border:2px solid #4CAF50;border-radius:10px;padding:20px;
-                                    text-align:center;background:#f0f8ff;margin:10px 0;">
-                            <h4 style="color:#4CAF50;margin-bottom:15px;">📄 Your PDF is Ready!</h4>
-                            <p>Click the button below to download your sticker labels</p>
-                        </div>""", unsafe_allow_html=True)
-
-                        st.download_button(
-                            label="📥 Download PDF File",
-                            data=pdf_bytes,
-                            file_name=filename,
-                            mime="application/pdf",
-                            type="primary",
-                            use_container_width=True,
-                        )
-                        st.info(f"📊 File size: {len(pdf_bytes)/1024/1024:.2f} MB | Labels: {len(df)}")
-
-                        try:
-                            os.unlink(pdf_path)
-                        except Exception:
-                            pass
-                    else:
-                        st.error("❌ Failed to generate sticker labels.")
-
+                df_grn = (pd.read_csv(file1)
+                          if file1.name.lower().endswith('.csv')
+                          else pd.read_excel(file1))
+                st.success(f"✅ GRN file loaded — {len(df_grn)} rows × {len(df_grn.columns)} columns")
+                st.write(f"**Columns:** {', '.join(df_grn.columns.tolist())}")
+                st.dataframe(df_grn.head(5), use_container_width=True)
             except Exception as e:
-                st.error(f"❌ Error reading file: {e}")
+                st.error(f"❌ Error reading GRN file: {e}")
+
+        if file2:
+            try:
+                df_loc = (pd.read_csv(file2)
+                          if file2.name.lower().endswith('.csv')
+                          else pd.read_excel(file2))
+                st.success(f"✅ Location file loaded — {len(df_loc)} rows × {len(df_loc.columns)} columns")
+                st.write(f"**Columns:** {', '.join(df_loc.columns.tolist())}")
+                st.dataframe(df_loc.head(5), use_container_width=True)
+            except Exception as e:
+                st.error(f"❌ Error reading Location file: {e}")
+
+        if df_grn is not None and df_loc is not None:
+            st.subheader("🎯 Generate Labels")
+            if st.button("🚀 Generate Sticker Labels", type="primary", use_container_width=True):
+                with st.spinner("Generating sticker labels…"):
+                    pdf_path = generate_sticker_labels(df_grn, df_loc)
+
+                if pdf_path:
+                    st.success("🎉 Sticker labels generated successfully!")
+                    with open(pdf_path, "rb") as f:
+                        pdf_bytes = f.read()
+
+                    filename = f"{file1.name.rsplit('.', 1)[0]}_sticker_labels.pdf"
+                    st.markdown("""
+                    <div style="border:2px solid #4CAF50;border-radius:10px;padding:20px;
+                                text-align:center;background:#f0f8ff;margin:10px 0;">
+                        <h4 style="color:#4CAF50;margin-bottom:15px;">📄 Your PDF is Ready!</h4>
+                        <p>Click the button below to download your sticker labels</p>
+                    </div>""", unsafe_allow_html=True)
+
+                    st.download_button(
+                        label="📥 Download PDF File",
+                        data=pdf_bytes,
+                        file_name=filename,
+                        mime="application/pdf",
+                        type="primary",
+                        use_container_width=True,
+                    )
+                    st.info(f"📊 File size: {len(pdf_bytes)/1024/1024:.2f} MB | "
+                            f"Labels: {len(df_grn)}")
+
+                    try:
+                        os.unlink(pdf_path)
+                    except Exception:
+                        pass
+                else:
+                    st.error("❌ Failed to generate sticker labels.")
+
+        elif file1 is None and file2 is None:
+            st.info("⬆️ Please upload both files above to get started.")
+        elif file1 is None:
+            st.warning("⚠️ Please also upload File 1 (GRN Data).")
+        elif file2 is None:
+            st.warning("⚠️ Please also upload File 2 (Store Location Master).")
 
     with col2:
         st.header("ℹ️ Instructions")
         st.markdown("""
 **How to use:**
-1. Upload your Excel or CSV file
-2. Review the data preview
-3. Click **Generate Sticker Labels**
-4. Download the PDF
+1. Upload **File 1** — GRN data
+2. Upload **File 2** — Store Location master
+3. The app matches on **Part No** to fill Store Location
+4. Click **Generate Sticker Labels**
+5. Download the PDF
 
-**Expected columns:**
+**File 1 expected columns:**
 - GRN No. / GRN Number
 - GRN Date / Receipt Date
 - Part No. / Part Number
 - Description / Name
 - Quantity / Qty
+
+**File 2 expected columns:**
+- Part No. / Part Number
+- Part Description
 - Store Location
 
 **Label layout (top → bottom):**
@@ -398,7 +441,7 @@ def main():
 4. Description
 5. Quantity
 6. Store Location (4-box grid)
-7. Barcode (Code-128, GRN No.)
+7. Barcode (Code-128, **encodes Store Location**)
 """)
 
         st.header("⚙️ Layout")
@@ -408,7 +451,7 @@ def main():
 - Content box   : 9.6 × 7.5 cm
 - All white background
 - Pure canvas drawing — no overflow possible
-- Barcode: Code-128, encodes GRN No.
+- Barcode: Code-128, encodes **Store Location**
 """)
 
 
