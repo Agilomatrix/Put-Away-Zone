@@ -136,23 +136,19 @@ def draw_wrapped_centered(c, text, x, y, w, h, font_size):
 def draw_sticker(c, grn_no, grn_date, part_no, desc, qty, loc_parts):
     """Draw the complete sticker content box on the current canvas page."""
 
-    # ── Compute row Y positions (top → bottom) ────────────────────────────────
-    # BOX_Y is the bottom of the box; top of box = BOX_Y + BOX_H
+    # ── Compute row Y positions ───────────────────────────────────────────────
     row_tops = []
-    y = BOX_Y + BOX_H   # start at top of box
+    y = BOX_Y + BOX_H   
     for rh in ROWS:
         y -= rh
-        row_tops.append(y)   # y = bottom of this row
-
-    # row_tops[0] = bottom y of row 0 (GRN No.)
-    # row_tops[6] = bottom y of row 6 (Barcode)
+        row_tops.append(y)   
 
     # ── Draw outer border ─────────────────────────────────────────────────────
     c.setStrokeColor(colors.black)
     c.setLineWidth(1.5)
     c.rect(BOX_X, BOX_Y, BOX_W, BOX_H)
 
-    # ── Draw each row ─────────────────────────────────────────────────────────
+    # ── Draw each row (0 to 4) ────────────────────────────────────────────────
     row_defs = [
         (0, "GRN No.",     grn_no,   F_LARGE,  True),
         (1, "GRN Date",    grn_date, F_MEDIUM, True),
@@ -162,87 +158,73 @@ def draw_sticker(c, grn_no, grn_date, part_no, desc, qty, loc_parts):
     ]
 
     c.setLineWidth(LW)
-
     for ri, label, value, vsize, vbold in row_defs:
-        ry  = row_tops[ri]          # bottom of row
+        ry  = row_tops[ri]
         rh  = ROWS[ri]
-
-        # Horizontal line at top of this row (skip for row 0 — that's the box top)
         if ri > 0:
             c.line(BOX_X, ry + rh, BOX_X + BOX_W, ry + rh)
-
-        # Vertical divider between label and value
         c.line(BOX_X + LABEL_W, ry, BOX_X + LABEL_W, ry + rh)
-
-        # Label text (left-aligned)
         draw_left_text(c, label, BOX_X, ry, LABEL_W, rh, F_LABEL, bold=True)
-
-        # Value text
-        if ri == 3:   # Description — may wrap
+        if ri == 3:
             draw_wrapped_centered(c, value, BOX_X + LABEL_W, ry, VALUE_W, rh, vsize)
         else:
             draw_centered_text(c, value, BOX_X + LABEL_W, ry, VALUE_W, rh, None, vsize, bold=vbold)
 
     # ── Store Location row (index 5) ──────────────────────────────────────────
-    ri  = 5
-    ry  = row_tops[ri]
-    rh  = ROWS[ri]
-
-    # Top border line of this row
+    ri, ry, rh = 5, row_tops[5], ROWS[5]
     c.line(BOX_X, ry + rh, BOX_X + BOX_W, ry + rh)
-
-    # Vertical divider after label
     c.line(BOX_X + LABEL_W, ry, BOX_X + LABEL_W, ry + rh)
-
-    # "Store Location" label — left-aligned, same style as other labels
     draw_left_text(c, "Store Location", BOX_X, ry, LABEL_W, rh, F_LABEL, bold=True)
-
-    # 4 equal boxes inside VALUE_W — each = VALUE_W/4
     loc_box_w = VALUE_W / 4
     for i, part in enumerate(loc_parts):
         lx = BOX_X + LABEL_W + i * loc_box_w
-        # Draw vertical divider (left edge of each box, skip first — already drawn)
-        if i > 0:
-            c.line(lx, ry, lx, ry + rh)
-        # Draw value
+        if i > 0: c.line(lx, ry, lx, ry + rh)
         draw_centered_text(c, part, lx, ry, loc_box_w, rh, None, F_LOC_VAL, bold=True)
 
-    # ── Barcode row (index 6) ─────────────────────────────────────────────────
-    ri  = 6
-    ry  = row_tops[ri]
-    rh  = ROWS[ri]
-
-    # Top border of barcode area
+    # ── Barcode row (index 6) ── SCAN ALL FIELDS ──────────────────────────────
+    ri, ry, rh = 6, row_tops[6], ROWS[6]
     c.line(BOX_X, ry + rh, BOX_X + BOX_W, ry + rh)
 
-    # Generate and draw barcode
-    bc_data = grn_no if grn_no else (part_no if part_no else "NO-DATA")
-
-    # Fit barcode within BOX_W with padding
-    pad = 0.5 * cm
-    avail_w = BOX_W - 2 * pad
-    char_count = max(len(bc_data), 1)
-    bar_w = avail_w / (char_count * 11 + 35 + 20)
-    bar_w = max(0.55, min(bar_w, 1.8))
+    # Create the Combined Data String for the Barcode
+    # Format: GRN|Date|Part|Desc|Qty|Loc
+    loc_combined = "-".join([p for p in loc_parts if p.strip()])
+    # We truncate Description to 15 chars in the barcode to keep the barcode width scan-able
+    bc_data = f"{grn_no}|{grn_date}|{part_no}|{desc[:15]}|{qty}|{loc_combined}"
+    
+    # Filter out characters that Code128 might struggle with in basic scanners
+    bc_data = re.sub(r'[^a-zA-Z0-9|.-]', ' ', bc_data)
 
     try:
+        # Dynamic bar width calculation to ensure it fits 9.6cm
+        # Code 128 uses roughly 11 modules per character + overhead
+        char_len = len(bc_data)
+        # Calculate bar width: available width (9.6cm - padding) / modules
+        # A character in Code128 is 11 modules wide. 
+        # Total modules approx = (chars * 11) + 35
+        estimated_modules = (char_len * 11) + 35
+        avail_points = (BOX_W - 0.6*cm) # 9.6cm minus some padding
+        calculated_bar_w = avail_points / estimated_modules
+        
+        # Ensure bar_w is within scannable limits (usually 0.4 to 1.2)
+        final_bar_w = max(0.42, min(calculated_bar_w, 1.2))
+
         bc = code128.Code128(
             bc_data,
-            barWidth=bar_w,
-            barHeight=rh * 0.62,
-            humanReadable=True,
+            barWidth=final_bar_w,
+            barHeight=rh * 0.60,
+            humanReadable=True, # Shows the text below the bars
             fontSize=F_BC_NUM,
             fontName='Helvetica',
         )
-        # Centre the barcode in the row
-        bc_w = bc.width
-        bc_x = BOX_X + (BOX_W - bc_w) / 2
+        
+        # Center the barcode
+        bc_x = BOX_X + (BOX_W - bc.width) / 2
         bc_y = ry + (rh - bc.height) / 2
         bc.drawOn(c, bc_x, bc_y)
+        
     except Exception as e:
-        c.setFont('Helvetica', 9)
-        c.drawCentredString(BOX_X + BOX_W / 2, ry + rh / 2, f"[BARCODE: {bc_data}]")
-        st.warning(f"Barcode draw error: {e}")
+        c.setFont('Helvetica', 8)
+        c.drawCentredString(BOX_X + BOX_W / 2, ry + rh / 2, f"Error: {str(e)[:40]}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
