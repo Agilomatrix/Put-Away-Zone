@@ -1,125 +1,87 @@
 import streamlit as st
 import pandas as pd
 import os
-from reportlab.lib.pagesizes import landscape
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Spacer, Paragraph, PageBreak, Image
-from reportlab.lib.units import cm, inch
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Spacer, Paragraph, PageBreak
+from reportlab.lib.units import cm
 from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
-from reportlab.lib.utils import ImageReader
+from reportlab.lib.enums import TA_LEFT, TA_CENTER
 from reportlab.graphics.barcode import code128
-from reportlab.graphics.shapes import Drawing
-from reportlab.graphics import renderPDF
-from io import BytesIO
 import re
 import tempfile
 
-# Auto-install required packages
 try:
     from PIL import Image as PILImage
 except ImportError:
     st.error("PIL not available. Please install: pip install pillow")
     st.stop()
 
-# ── Sticker page dimensions ──────────────────────────────────────────────────
-STICKER_WIDTH  = 10 * cm
-STICKER_HEIGHT = 15 * cm
+# ── Page dimensions ───────────────────────────────────────────────────────────
+STICKER_WIDTH   = 10 * cm
+STICKER_HEIGHT  = 15 * cm
 STICKER_PAGESIZE = (STICKER_WIDTH, STICKER_HEIGHT)
 
-# ── Paragraph styles ──────────────────────────────────────────────────────────
-header_label_style = ParagraphStyle(
-    name='HeaderLabel',
-    fontName='Helvetica-Bold',
-    fontSize=10,
-    alignment=TA_LEFT,
-    leading=12,
-)
-header_value_style = ParagraphStyle(
-    name='HeaderValue',
-    fontName='Helvetica-Bold',
-    fontSize=11,
-    alignment=TA_LEFT,
-    leading=12,
-)
-big_value_style = ParagraphStyle(
-    name='BigValue',
-    fontName='Helvetica-Bold',
-    fontSize=13,
-    alignment=TA_CENTER,
-    leading=14,
-)
-desc_value_style = ParagraphStyle(
-    name='DescValue',
-    fontName='Helvetica',
-    fontSize=10,
-    alignment=TA_CENTER,
-    leading=12,
-)
-loc_label_style = ParagraphStyle(
-    name='LocLabel',
-    fontName='Helvetica-Bold',
-    fontSize=10,
-    alignment=TA_CENTER,
-    leading=12,
-)
+# ── Content box: exactly 10 cm wide × 7.5 cm tall ────────────────────────────
+CONTENT_W = 10 * cm
+CONTENT_H =  7.5 * cm
 
+# Tiny page margins so the content box butts up to the edges
+SIDE_MARGIN = 0.0 * cm
+TOP_MARGIN  = 0.0 * cm   # distance from top of page to top of box
+
+# ── Inner usable width ────────────────────────────────────────────────────────
+INNER_W  = CONTENT_W          # full 10 cm
+LABEL_W  = INNER_W * 0.36     # 3.6 cm — field-name column
+VALUE_W  = INNER_W - LABEL_W  # 6.4 cm — value column
+
+# ── Row heights: must sum to exactly CONTENT_H = 7.5 cm ──────────────────────
+# 5 standard rows × 0.78 cm = 3.90 cm
+# Description row              = 0.90 cm
+# Store Location row           = 0.82 cm
+# Barcode row                  = 1.88 cm
+# Total = 3.90 + 0.90 + 0.82 + 1.88 = 7.50 cm ✓
+ROW_H      = 0.78 * cm
+DESC_ROW_H = 0.90 * cm
+LOC_ROW_H  = 0.82 * cm
+BC_ROW_H   = 1.88 * cm
+
+# ── Paragraph styles ──────────────────────────────────────────────────────────
+lbl_style = ParagraphStyle(
+    'Lbl', fontName='Helvetica-Bold', fontSize=8.5,
+    alignment=TA_LEFT, leading=10, leftIndent=3,
+)
+val_large = ParagraphStyle(
+    'ValLarge', fontName='Helvetica-Bold', fontSize=11,
+    alignment=TA_CENTER, leading=12,
+)
+val_bold = ParagraphStyle(
+    'ValBold', fontName='Helvetica-Bold', fontSize=10,
+    alignment=TA_CENTER, leading=11,
+)
+val_normal = ParagraphStyle(
+    'ValNorm', fontName='Helvetica', fontSize=9,
+    alignment=TA_CENTER, leading=10,
+)
+loc_lbl_style = ParagraphStyle(
+    'LocLbl', fontName='Helvetica-Bold', fontSize=8.5,
+    alignment=TA_CENTER, leading=10,
+)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def generate_barcode(data_string, width_cm=9.0, height_cm=1.8):
-    """Return a ReportLab Image of a Code-128 barcode."""
-    try:
-        barcode = code128.Code128(
-            data_string,
-            barWidth=0.5,
-            barHeight=height_cm * cm,
-            humanReadable=True,
-            fontSize=8,
-            fontName='Helvetica',
-        )
-        buf = BytesIO()
-        barcode_width  = barcode.width
-        barcode_height = barcode.height
-
-        d = Drawing(barcode_width, barcode_height)
-        barcode.drawOn(d._canvas if hasattr(d, '_canvas') else None, 0, 0)
-
-        # Use renderPDF to a temp canvas then grab image via PIL approach
-        # Simpler: draw directly via platypus flowable trick
-        return barcode          # we'll use it as a Flowable directly
-    except Exception as e:
-        st.error(f"Barcode error: {e}")
-        return None
-
-
-def parse_location_string(location_str):
-    """Split a location string into up to 4 parts."""
+def parse_location(loc_str):
     parts = [''] * 4
-    if not location_str or not isinstance(location_str, str):
+    if not loc_str or not isinstance(loc_str, str):
         return parts
-    matches = re.findall(r'([^_\s]+)', location_str.strip())
+    matches = re.findall(r'([^_\s]+)', loc_str.strip())
     for i, m in enumerate(matches[:4]):
         parts[i] = m
     return parts
 
 
-def clean_date(date_val):
-    """Return a clean date string (date part only)."""
-    s = str(date_val) if date_val and str(date_val) != 'nan' else ''
-    if not s:
-        return ''
+def clean_date(val):
+    s = str(val) if val and str(val) != 'nan' else ''
     return s.split(' ')[0] if ' ' in s else s
-
-
-def row_label_value(label, value, label_w, value_w, row_h, value_style=None):
-    """Return a 2-column Table row: bold label | value."""
-    vs = value_style or header_value_style
-    return Table(
-        [[Paragraph(label, header_label_style), Paragraph(str(value), vs)]],
-        colWidths=[label_w, value_w],
-        rowHeights=[row_h],
-    )
 
 
 # ── Main generator ────────────────────────────────────────────────────────────
@@ -127,197 +89,178 @@ def row_label_value(label, value, label_w, value_w, row_h, value_style=None):
 def generate_sticker_labels(df):
 
     def draw_border(canvas, doc):
+        """Draw border exactly around the 10 × 7.5 cm content box."""
         canvas.saveState()
-        canvas.setStrokeColor(colors.Color(0, 0, 0, alpha=0.95))
-        canvas.setLineWidth(1.8)
-        canvas.rect(
-            doc.leftMargin,
-            doc.bottomMargin,
-            STICKER_WIDTH  - doc.leftMargin  - doc.rightMargin,
-            STICKER_HEIGHT - doc.topMargin   - doc.bottomMargin,
-        )
+        canvas.setStrokeColor(colors.black)
+        canvas.setLineWidth(1.5)
+        # box starts at bottom-left = (0, STICKER_HEIGHT - CONTENT_H)
+        box_x = 0
+        box_y = STICKER_HEIGHT - CONTENT_H
+        canvas.rect(box_x, box_y, CONTENT_W, CONTENT_H)
         canvas.restoreState()
 
-    # ── Normalise column names ────────────────────────────────────────────────
+    # ── Normalise column names ─────────────────────────────────────────────────
     df_copy = df.copy()
     df_copy.columns = [c.upper().strip() if isinstance(c, str) else c for c in df_copy.columns]
     cols = df_copy.columns.tolist()
 
-    def find_col(*keywords, fallback=None):
-        for kw_group in keywords:
-            if isinstance(kw_group, str):
-                kw_group = [kw_group]
+    def find_col(*kw_groups, fallback=None):
+        for kwg in kw_groups:
+            kwg = [kwg] if isinstance(kwg, str) else kwg
             for col in cols:
-                if all(k in col for k in kw_group):
+                if all(k in col for k in kwg):
                     return col
         return fallback
 
-    grn_no_col       = find_col(['GRN', 'NO'], ['GRN', 'NUM'], 'GRN', fallback=cols[0])
-    grn_date_col     = find_col(['GRN', 'DATE'], ['RECEIPT', 'DATE'], 'DATE', fallback=None)
-    part_no_col      = find_col(['PART', 'NO'], ['PART', 'NUM'], 'PART', fallback=cols[0])
-    desc_col         = find_col('DESC', 'NAME', fallback=cols[1] if len(cols) > 1 else cols[0])
-    qty_col          = find_col('QTY', 'QUANTITY', fallback=None)
-    store_loc_col    = find_col(['STORE', 'LOC'], 'STORELOCATION', 'LOCATION', 'LOC',
-                                fallback=cols[2] if len(cols) > 2 else None)
+    grn_no_col    = find_col(['GRN', 'NO'], ['GRN', 'NUM'], 'GRN',        fallback=cols[0])
+    grn_date_col  = find_col(['GRN', 'DATE'], ['RECEIPT', 'DATE'], 'DATE', fallback=None)
+    part_no_col   = find_col(['PART', 'NO'], ['PART', 'NUM'], 'PART',      fallback=cols[0])
+    desc_col      = find_col('DESC', 'NAME',                               fallback=cols[1] if len(cols) > 1 else cols[0])
+    qty_col       = find_col('QTY', 'QUANTITY',                            fallback=None)
+    store_loc_col = find_col(['STORE', 'LOC'], 'STORELOCATION', 'LOCATION', 'LOC',
+                              fallback=cols[2] if len(cols) > 2 else None)
 
-    # ── Document setup ────────────────────────────────────────────────────────
-    temp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
-    temp_pdf_path = temp_pdf.name
-    temp_pdf.close()
+    # ── Document: place flow area exactly inside the content box ─────────────
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+    tmp_path = tmp.name
+    tmp.close()
 
-    MARGIN = 0.25 * cm
     doc = SimpleDocTemplate(
-        temp_pdf_path,
+        tmp_path,
         pagesize=STICKER_PAGESIZE,
-        topMargin=MARGIN,
-        bottomMargin=MARGIN,
-        leftMargin=MARGIN,
-        rightMargin=MARGIN,
+        topMargin=TOP_MARGIN,
+        bottomMargin=STICKER_HEIGHT - TOP_MARGIN - CONTENT_H,
+        leftMargin=SIDE_MARGIN,
+        rightMargin=SIDE_MARGIN,
     )
 
-    content_width = STICKER_WIDTH - 2 * MARGIN
-    label_w = content_width * 0.38   # left column (field name)
-    value_w = content_width * 0.62   # right column (value)
-    row_h   = 1.1 * cm
-
     all_elements = []
-    progress_bar       = st.progress(0)
-    status_placeholder = st.empty()
-    total_rows = len(df_copy)
+    progress_bar = st.progress(0)
+    status_ph    = st.empty()
+    total_rows   = len(df_copy)
 
     for idx, (_, row) in enumerate(df_copy.iterrows()):
-        progress = (idx + 1) / total_rows
-        progress_bar.progress(progress)
-        status_placeholder.text(f"Creating sticker {idx+1} of {total_rows} ({int(progress*100)}%)")
+        progress_bar.progress((idx + 1) / total_rows)
+        status_ph.text(f"Creating sticker {idx+1} of {total_rows} ({int((idx+1)/total_rows*100)}%)")
 
-        # ── Extract values ────────────────────────────────────────────────────
         def get(col):
             if col and col in row and pd.notna(row[col]):
                 return str(row[col])
             return ''
 
-        grn_no       = get(grn_no_col)
-        grn_date     = clean_date(get(grn_date_col)) if grn_date_col else ''
-        part_no      = get(part_no_col)
-        desc         = get(desc_col)
-        qty          = get(qty_col) if qty_col else ''
-        store_loc    = get(store_loc_col) if store_loc_col else ''
-        loc_parts    = parse_location_string(store_loc)
+        grn_no    = get(grn_no_col)
+        grn_date  = clean_date(get(grn_date_col)) if grn_date_col else ''
+        part_no   = get(part_no_col)
+        desc      = get(desc_col)
+        qty       = get(qty_col) if qty_col else ''
+        store_loc = get(store_loc_col) if store_loc_col else ''
+        loc_parts = parse_location(store_loc)
 
-        # Truncate description if very long
-        desc_display = desc[:55] + '…' if len(desc) > 58 else desc
+        desc_display = desc[:52] + '…' if len(desc) > 55 else desc
 
-        # ── Build table rows ──────────────────────────────────────────────────
+        # ── Main 5-row table ──────────────────────────────────────────────────
         table_data = [
-            [Paragraph("GRN No.",     header_label_style), Paragraph(grn_no,       big_value_style)],
-            [Paragraph("GRN Date",    header_label_style), Paragraph(grn_date,      header_value_style)],
-            [Paragraph("Part No.",    header_label_style), Paragraph(part_no,       big_value_style)],
-            [Paragraph("Description", header_label_style), Paragraph(desc_display,  desc_value_style)],
-            [Paragraph("Quantity",    header_label_style), Paragraph(qty,           big_value_style)],
+            [Paragraph("GRN No.",     lbl_style), Paragraph(grn_no,       val_large)],
+            [Paragraph("GRN Date",    lbl_style), Paragraph(grn_date,      val_bold)],
+            [Paragraph("Part No.",    lbl_style), Paragraph(part_no,       val_large)],
+            [Paragraph("Description", lbl_style), Paragraph(desc_display,  val_normal)],
+            [Paragraph("Quantity",    lbl_style), Paragraph(qty,           val_large)],
         ]
-
-        row_heights = [row_h, row_h, row_h, 1.4 * cm, row_h]
-
         main_table = Table(
             table_data,
-            colWidths=[label_w, value_w],
-            rowHeights=row_heights,
+            colWidths=[LABEL_W, VALUE_W],
+            rowHeights=[ROW_H, ROW_H, ROW_H, DESC_ROW_H, ROW_H],
         )
         main_table.setStyle(TableStyle([
-            ('GRID',      (0, 0), (-1, -1), 1.2,  colors.black),
-            ('VALIGN',    (0, 0), (-1, -1), 'MIDDLE'),
-            ('ALIGN',     (0, 0), (0,  -1), 'LEFT'),
-            ('ALIGN',     (1, 0), (1,  -1), 'CENTER'),
-            ('LEFTPADDING',  (0, 0), (-1, -1), 4),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
-            ('TOPPADDING',   (0, 0), (-1, -1), 2),
-            ('BOTTOMPADDING',(0, 0), (-1, -1), 2),
-            ('BACKGROUND', (0, 0), (0, -1), colors.Color(0.93, 0.93, 0.93)),
+            ('GRID',          (0, 0), (-1, -1), 1.0,  colors.black),
+            ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
+            ('BACKGROUND',    (0, 0), (0,  -1), colors.Color(0.91, 0.91, 0.91)),
+            ('LEFTPADDING',   (0, 0), (-1, -1), 3),
+            ('RIGHTPADDING',  (0, 0), (-1, -1), 3),
+            ('TOPPADDING',    (0, 0), (-1, -1), 1),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
         ]))
 
         # ── Store Location row ────────────────────────────────────────────────
-        inner_col_w = value_w / 4
+        loc_inner_w = VALUE_W / 4
         inner_table = Table(
             [loc_parts],
-            colWidths=[inner_col_w] * 4,
-            rowHeights=[row_h],
+            colWidths=[loc_inner_w] * 4,
+            rowHeights=[LOC_ROW_H],
         )
         inner_table.setStyle(TableStyle([
-            ('GRID',     (0, 0), (-1, -1), 1.2, colors.black),
-            ('ALIGN',    (0, 0), (-1, -1), 'CENTER'),
-            ('VALIGN',   (0, 0), (-1, -1), 'MIDDLE'),
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('GRID',    (0, 0), (-1, -1), 1.0, colors.black),
+            ('ALIGN',   (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN',  (0, 0), (-1, -1), 'MIDDLE'),
+            ('FONTNAME',(0, 0), (-1, -1), 'Helvetica-Bold'),
+            ('FONTSIZE',(0, 0), (-1, -1), 9),
+            ('TOPPADDING',    (0, 0), (-1, -1), 1),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
         ]))
 
         loc_table = Table(
-            [[Paragraph("Store Location", loc_label_style), inner_table]],
-            colWidths=[label_w, value_w],
-            rowHeights=[row_h],
+            [[Paragraph("Store\nLocation", loc_lbl_style), inner_table]],
+            colWidths=[LABEL_W, VALUE_W],
+            rowHeights=[LOC_ROW_H],
         )
         loc_table.setStyle(TableStyle([
-            ('GRID',       (0, 0), (-1, -1), 1.2, colors.black),
-            ('VALIGN',     (0, 0), (-1, -1), 'MIDDLE'),
-            ('ALIGN',      (0, 0), (0, 0),   'CENTER'),
-            ('BACKGROUND', (0, 0), (0, 0),   colors.Color(0.93, 0.93, 0.93)),
-            ('LEFTPADDING',  (0, 0), (0, 0), 4),
+            ('GRID',          (0, 0), (-1, -1), 1.0, colors.black),
+            ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN',         (0, 0), (0,  0),  'CENTER'),
+            ('BACKGROUND',    (0, 0), (0,  0),  colors.Color(0.91, 0.91, 0.91)),
+            ('LEFTPADDING',   (0, 0), (-1, -1), 2),
+            ('RIGHTPADDING',  (0, 0), (-1, -1), 2),
+            ('TOPPADDING',    (0, 0), (-1, -1), 1),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
         ]))
 
-        # ── Barcode ───────────────────────────────────────────────────────────
-        barcode_data = grn_no if grn_no else (part_no if part_no else "NO-DATA")
+        # ── Barcode row ───────────────────────────────────────────────────────
+        bc_data = grn_no if grn_no else (part_no if part_no else "NO-DATA")
+
+        # Auto-scale barWidth so barcode fits within INNER_W
+        char_count = max(len(bc_data), 1)
+        target_w   = INNER_W - 0.4 * cm     # leave tiny padding
+        bar_w      = target_w / (char_count * 11 + 35 + 20)
+        bar_w      = max(0.55, min(bar_w, 1.5))   # clamp
+
         try:
             bc = code128.Code128(
-                barcode_data,
-                barWidth=1.05,
-                barHeight=1.5 * cm,
+                bc_data,
+                barWidth=bar_w,
+                barHeight=BC_ROW_H * 0.58,
                 humanReadable=True,
-                fontSize=8,
+                fontSize=7,
                 fontName='Helvetica',
             )
+            bc_cell = bc
         except Exception as e:
-            bc = None
-            st.warning(f"Barcode generation failed for row {idx+1}: {e}")
+            bc_cell = Paragraph(f"[BARCODE: {bc_data}]", val_normal)
+            st.warning(f"Barcode error row {idx+1}: {e}")
 
-        # ── Assemble page elements ────────────────────────────────────────────
-        elements = [
-            Spacer(1, 0.1 * cm),
-            main_table,
-            loc_table,
-            Spacer(1, 0.25 * cm),
-        ]
+        bc_table = Table(
+            [[bc_cell]],
+            colWidths=[INNER_W],
+            rowHeights=[BC_ROW_H],
+        )
+        bc_table.setStyle(TableStyle([
+            ('BOX',           (0, 0), (-1, -1), 1.0, colors.black),
+            ('ALIGN',         (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING',    (0, 0), (-1, -1), 2),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ]))
 
-        if bc:
-            # Wrap barcode in a centred single-cell table
-            bc_table = Table(
-                [[bc]],
-                colWidths=[content_width],
-                rowHeights=[2.0 * cm],
-            )
-            bc_table.setStyle(TableStyle([
-                ('ALIGN',  (0, 0), (-1, -1), 'CENTER'),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('BOX',    (0, 0), (-1, -1), 1.2, colors.black),
-            ]))
-            elements.append(bc_table)
-        else:
-            elements.append(
-                Table(
-                    [[Paragraph("[ BARCODE ]", big_value_style)]],
-                    colWidths=[content_width],
-                    rowHeights=[2.0 * cm],
-                )
-            )
-
-        all_elements.extend(elements)
+        # ── Assemble ──────────────────────────────────────────────────────────
+        all_elements.extend([main_table, loc_table, bc_table])
         if idx < total_rows - 1:
             all_elements.append(PageBreak())
 
     # ── Build PDF ─────────────────────────────────────────────────────────────
     try:
         doc.build(all_elements, onFirstPage=draw_border, onLaterPages=draw_border)
-        status_placeholder.text("PDF generated successfully!")
+        status_ph.text("PDF generated successfully!")
         progress_bar.progress(1.0)
-        return temp_pdf_path
+        return tmp_path
     except Exception as e:
         st.error(f"Error building PDF: {e}")
         return None
@@ -331,10 +274,9 @@ def main():
         page_icon="🏷️",
         layout="wide",
     )
-
     st.title("🏷️ Put Away Zone Label Generator")
     st.markdown(
-        "<p style='font-size:18px; font-style:italic; margin-top:-10px;'>"
+        "<p style='font-size:18px;font-style:italic;margin-top:-10px;'>"
         "Designed and Developed by Agilomatrix</p>",
         unsafe_allow_html=True,
     )
@@ -352,10 +294,9 @@ def main():
 
         if uploaded_file is not None:
             try:
-                if uploaded_file.name.lower().endswith('.csv'):
-                    df = pd.read_csv(uploaded_file)
-                else:
-                    df = pd.read_excel(uploaded_file)
+                df = (pd.read_csv(uploaded_file)
+                      if uploaded_file.name.lower().endswith('.csv')
+                      else pd.read_excel(uploaded_file))
 
                 st.success(f"✅ File loaded! {len(df)} rows × {len(df.columns)} columns.")
                 st.subheader("📊 Data Preview")
@@ -405,7 +346,7 @@ def main():
         st.markdown("""
 **How to use:**
 1. Upload your Excel or CSV file
-2. Preview the data
+2. Review the data preview
 3. Click **Generate Sticker Labels**
 4. Download the PDF
 
@@ -418,22 +359,23 @@ def main():
 - Store Location
 
 **Label layout (top → bottom):**
-- GRN No.
-- GRN Date
-- Part No.
-- Description
-- Quantity
-- Store Location
-- **Barcode** (Code-128, GRN No.)
+1. GRN No.
+2. GRN Date
+3. Part No.
+4. Description
+5. Quantity
+6. Store Location (4-box grid)
+7. Barcode (Code-128)
 """)
 
-        st.header("⚙️ Settings")
+        st.header("⚙️ Layout")
         st.markdown("""
 **Fixed configuration:**
-- Sticker size: 10 × 15 cm
-- Barcode: Code-128 (GRN No.)
-- Professional border & shading
+- Sticker page  : 10 × 15 cm
+- Content box   : 10 × 7.5 cm (exact)
+- Barcode       : Code-128 (GRN No.)
 - Auto column detection
+- Shaded label column
 """)
 
 
