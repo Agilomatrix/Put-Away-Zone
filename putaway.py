@@ -167,7 +167,7 @@ def draw_sticker(c, grn_no, grn_date, part_no, desc, qty, uom,
     c.line(BOX_X, ry + rh, BOX_X + BOX_W, ry + rh)
     c.line(BOX_X + LABEL_W, ry, BOX_X + LABEL_W, ry + rh)
 
-    draw_left_text(c, "Store Location", BOX_X, ry, LABEL_W, rh, F_LABEL, bold=True)
+    draw_left_text(c, "Storage Loc", BOX_X, ry, LABEL_W, rh, F_LABEL, bold=True)
 
     loc_box_w = VALUE_W / 4
     for i, part in enumerate(loc_parts):
@@ -359,7 +359,7 @@ def main():
 
         st.subheader("File 2 — Store Location Master")
         file2 = st.file_uploader(
-            "Upload Location file (Excel / CSV)  ·  columns: Part No, Part Description, Store Location, UOM",
+            "Upload Location file (Excel / CSV)  ·  columns: Part No, Part Description, Storage Loc, UOM",
             type=['xlsx', 'xls', 'csv'],
             key="file2",
         )
@@ -453,7 +453,7 @@ def main():
 **File 2 expected columns:**
 - Part No. / Part Number
 - Part Description
-- Store Location
+- Storage Loc / Store Location
 - UOM / Unit / Unit of Measure
 
 **Label layout (top → bottom):**
@@ -463,7 +463,7 @@ def main():
 4. Description
 5. Quantity
 6. UOM
-7. Store Location (4-box grid)
+7. Storage Loc (4-box grid)
 8. Barcode (Code-128, **encodes Store Location**)
 """)
 
@@ -474,7 +474,7 @@ def main():
 - Content box   : 9.6 × 7.5 cm
 - 8 rows, all white background
 - Pure canvas drawing — no overflow possible
-- Barcode: Code-128, encodes **Store Location**
+- Barcode: Code-128, encodes **Storage Loc**
 - UOM looked up from File 2 by Part No
 """)
 
