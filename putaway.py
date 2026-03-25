@@ -35,14 +35,10 @@ LABEL_W = BOX_W * 0.33
 VALUE_W = BOX_W - LABEL_W
 
 # ── Row heights (8 rows) ──────────────────────────────────────────────────────
-# Rows: GRN No, Date, Part, Desc, Qty, UOM, Loc, BC
-# 6*R + RD + RL + RB = 6*0.72 + 0.90 + 2.28 = 4.32 + 0.90 + 2.28 = 7.50 ✓
-# Note: RL == R here (same height), kept separate for clarity
-R  = 0.72 * cm   # standard row height  (GRN No, Date, Part, Qty, UOM, Loc)
-RD = 0.90 * cm   # description row (slightly taller for wrapped text)
-RB = 2.28 * cm   # barcode row
+R  = 0.72 * cm
+RD = 0.90 * cm
+RB = 2.28 * cm
 
-# ROWS order: GRN No, Date, Part No, Desc, Qty, UOM, Store Loc, Barcode
 ROWS = [R, R, R, RD, R, R, R, RB]
 
 # ── Font sizes ────────────────────────────────────────────────────────────────
@@ -76,6 +72,31 @@ def clean_num(val):
         return val[:-2]
     return val
 
+def draw_left_value(c, text, x, y, w, h, font, size, bold=False):
+    """Draw value text left-aligned inside the value cell."""
+    fname = 'Helvetica-Bold' if bold else 'Helvetica'
+    c.setFont(fname, size)
+    while c.stringWidth(text, fname, size) > w - 8 and size > 6:
+        size -= 0.5
+        c.setFont(fname, size)
+    ty = y + (h - size * 0.35) / 2
+    c.drawString(x + 4, ty, text)
+
+def draw_left_text(c, text, x, y, w, h, font_size, bold=True):
+    fname = 'Helvetica-Bold' if bold else 'Helvetica'
+    c.setFont(fname, font_size)
+    ty = y + (h - font_size * 0.35) / 2
+    c.drawString(x + 4, ty, text)
+
+def draw_wrapped_left(c, text, x, y, w, h, font_size):
+    """Draw description text left-aligned with wrapping."""
+    style = ParagraphStyle('tmp', fontName='Helvetica', fontSize=font_size,
+                           alignment=TA_LEFT, leading=font_size + 2)
+    p = Paragraph(text, style)
+    pw, ph = p.wrap(w - 8, h)
+    py = y + (h - ph) / 2
+    p.drawOn(c, x + 4, py)
+
 def draw_centered_text(c, text, x, y, w, h, font, size, bold=False):
     fname = 'Helvetica-Bold' if bold else 'Helvetica'
     c.setFont(fname, size)
@@ -86,20 +107,6 @@ def draw_centered_text(c, text, x, y, w, h, font, size, bold=False):
     tx = x + (w - text_w) / 2
     ty = y + (h - size * 0.35) / 2
     c.drawString(tx, ty, text)
-
-def draw_left_text(c, text, x, y, w, h, font_size, bold=True):
-    fname = 'Helvetica-Bold' if bold else 'Helvetica'
-    c.setFont(fname, font_size)
-    ty = y + (h - font_size * 0.35) / 2
-    c.drawString(x + 4, ty, text)
-
-def draw_wrapped_centered(c, text, x, y, w, h, font_size):
-    style = ParagraphStyle('tmp', fontName='Helvetica', fontSize=font_size,
-                           alignment=TA_CENTER, leading=font_size + 2)
-    p = Paragraph(text, style)
-    pw, ph = p.wrap(w - 8, h)
-    py = y + (h - ph) / 2
-    p.drawOn(c, x + 4, py)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -145,13 +152,14 @@ def draw_sticker(c, grn_no, grn_date, part_no, desc, qty, uom,
 
         draw_left_text(c, label, BOX_X, ry, LABEL_W, rh, F_LABEL, bold=True)
 
+        # ── VALUES: all left-aligned ──────────────────────────────────────────
         if ri == 3:
-            draw_wrapped_centered(c, value, BOX_X + LABEL_W, ry, VALUE_W, rh, vsize)
+            draw_wrapped_left(c, value, BOX_X + LABEL_W, ry, VALUE_W, rh, vsize)
         else:
-            draw_centered_text(c, value, BOX_X + LABEL_W, ry, VALUE_W, rh,
-                               None, vsize, bold=vbold)
+            draw_left_value(c, value, BOX_X + LABEL_W, ry, VALUE_W, rh,
+                            None, vsize, bold=vbold)
 
-    # ── Store Location row (index 6) ──────────────────────────────────────────
+    # ── Store Location row (index 6) — UNCHANGED (centered per-box) ──────────
     ri  = 6
     ry  = row_tops[ri]
     rh  = ROWS[ri]
@@ -175,7 +183,6 @@ def draw_sticker(c, grn_no, grn_date, part_no, desc, qty, uom,
 
     c.line(BOX_X, ry + rh, BOX_X + BOX_W, ry + rh)
 
-    # Use raw store location for barcode; fall back to part_no then grn_no
     bc_data = (store_loc_raw.strip() if store_loc_raw and store_loc_raw.strip()
                else (part_no if part_no else (grn_no if grn_no else "NO-DATA")))
 
@@ -228,7 +235,6 @@ def generate_sticker_labels(df_grn, df_loc):
     Merge on Part No, then generate one sticker per row of df_grn.
     """
 
-    # ── Normalise column names ────────────────────────────────────────────────
     def norm_cols(df):
         df = df.copy()
         df.columns = [c.upper().strip() if isinstance(c, str) else c
@@ -241,7 +247,6 @@ def generate_sticker_labels(df_grn, df_loc):
     g_cols = df_grn.columns.tolist()
     l_cols = df_loc.columns.tolist()
 
-    # File 1 columns
     grn_no_col   = find_col(g_cols, ['GRN','NO'], ['GRN','NUM'], ['GRN','#'],
                              'GRNNO', 'GRN_NO', 'GRN', fallback=g_cols[0])
     grn_date_col = find_col(g_cols, ['GRN','DATE'], ['RECEIPT','DATE'],
@@ -252,7 +257,6 @@ def generate_sticker_labels(df_grn, df_loc):
                              fallback=g_cols[1] if len(g_cols) > 1 else g_cols[0])
     qty_col      = find_col(g_cols, 'QTY', 'QUANTITY', fallback=None)
 
-    # File 2 columns
     part_no_col2  = find_col(l_cols, ['PART','NO'], ['PART','NUM'], ['PART','#'],
                               'PARTNO', 'PART_NO', 'PART', fallback=l_cols[0])
     store_loc_col = find_col(l_cols, ['STORE','LOC'], 'STORELOCATION',
@@ -261,9 +265,8 @@ def generate_sticker_labels(df_grn, df_loc):
     uom_col       = find_col(l_cols, 'UOM', 'UNIT OF MEASURE', 'UNIT',
                               fallback=None)
 
-    # ── Build lookup: part_no → (store_location, uom) ────────────────────────
-    loc_lookup = {}   # part_no → store_location string
-    uom_lookup = {}   # part_no → uom string
+    loc_lookup = {}
+    uom_lookup = {}
 
     for _, row in df_loc.iterrows():
         pn = str(row[part_no_col2]).strip() if pd.notna(row[part_no_col2]) else ''
@@ -276,7 +279,6 @@ def generate_sticker_labels(df_grn, df_loc):
                 loc_lookup[key] = sl
                 uom_lookup[key] = um
 
-    # ── Create PDF ────────────────────────────────────────────────────────────
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
     tmp_path = tmp.name
     tmp.close()
@@ -304,7 +306,6 @@ def generate_sticker_labels(df_grn, df_loc):
         desc     = get(row, desc_col1)
         qty      = get(row, qty_col) if qty_col else ''
 
-        # Look up store location and UOM from File 2 by matching Part No
         store_loc_raw = (loc_lookup.get(part_no)
                          or loc_lookup.get(part_no.upper())
                          or loc_lookup.get(part_no.lower())
