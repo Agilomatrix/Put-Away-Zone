@@ -34,13 +34,16 @@ BOX_Y   = PAGE_H - 0.20*cm - BOX_H
 LABEL_W = BOX_W * 0.33
 VALUE_W = BOX_W - LABEL_W
 
-# ── Row heights (4*R + RD + RL + RB = 3.20+0.95+0.80+2.55 = 7.50 ✓) ─────────
-R  = 0.80 * cm
-RD = 0.95 * cm
-RL = 0.80 * cm
-RB = 2.55 * cm
+# ── Row heights (8 rows) ──────────────────────────────────────────────────────
+# Rows: GRN No, Date, Part, Desc, Qty, UOM, Loc, BC
+# 6*R + RD + RL + RB = 6*0.72 + 0.90 + 2.28 = 4.32 + 0.90 + 2.28 = 7.50 ✓
+# Note: RL == R here (same height), kept separate for clarity
+R  = 0.72 * cm   # standard row height  (GRN No, Date, Part, Qty, UOM, Loc)
+RD = 0.90 * cm   # description row (slightly taller for wrapped text)
+RB = 2.28 * cm   # barcode row
 
-ROWS = [R, R, R, RD, R, RL, RB]  # GRN No, Date, Part, Desc, Qty, Loc, BC
+# ROWS order: GRN No, Date, Part No, Desc, Qty, UOM, Store Loc, Barcode
+ROWS = [R, R, R, RD, R, R, R, RB]
 
 # ── Font sizes ────────────────────────────────────────────────────────────────
 F_LABEL   = 12
@@ -103,9 +106,11 @@ def draw_wrapped_centered(c, text, x, y, w, h, font_size):
 # DRAW ONE STICKER
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def draw_sticker(c, grn_no, grn_date, part_no, desc, qty, loc_parts, store_loc_raw):
+def draw_sticker(c, grn_no, grn_date, part_no, desc, qty, uom,
+                 loc_parts, store_loc_raw):
     """Draw sticker. Barcode encodes the raw store location string."""
 
+    # Build the y-coordinate (bottom) of each row, top-down
     row_tops = []
     y = BOX_Y + BOX_H
     for rh in ROWS:
@@ -117,13 +122,14 @@ def draw_sticker(c, grn_no, grn_date, part_no, desc, qty, loc_parts, store_loc_r
     c.setLineWidth(1.5)
     c.rect(BOX_X, BOX_Y, BOX_W, BOX_H)
 
-    # ── Rows 0-4 (GRN No, Date, Part No, Desc, Qty) ───────────────────────────
+    # ── Rows 0-5 (GRN No, Date, Part No, Desc, Qty, UOM) ─────────────────────
     row_defs = [
         (0, "GRN No.",     grn_no,   F_LARGE,  True),
         (1, "GRN Date",    grn_date, F_MEDIUM, True),
         (2, "Part No.",    part_no,  F_LARGE,  True),
         (3, "Description", desc,     F_SMALL,  False),
         (4, "Quantity",    qty,      F_LARGE,  True),
+        (5, "UOM",         uom,      F_LARGE,  True),
     ]
 
     c.setLineWidth(LW)
@@ -142,10 +148,11 @@ def draw_sticker(c, grn_no, grn_date, part_no, desc, qty, loc_parts, store_loc_r
         if ri == 3:
             draw_wrapped_centered(c, value, BOX_X + LABEL_W, ry, VALUE_W, rh, vsize)
         else:
-            draw_centered_text(c, value, BOX_X + LABEL_W, ry, VALUE_W, rh, None, vsize, bold=vbold)
+            draw_centered_text(c, value, BOX_X + LABEL_W, ry, VALUE_W, rh,
+                               None, vsize, bold=vbold)
 
-    # ── Store Location row (index 5) ──────────────────────────────────────────
-    ri  = 5
+    # ── Store Location row (index 6) ──────────────────────────────────────────
+    ri  = 6
     ry  = row_tops[ri]
     rh  = ROWS[ri]
 
@@ -161,16 +168,16 @@ def draw_sticker(c, grn_no, grn_date, part_no, desc, qty, loc_parts, store_loc_r
             c.line(lx, ry, lx, ry + rh)
         draw_centered_text(c, part, lx, ry, loc_box_w, rh, None, F_LOC_VAL, bold=True)
 
-    # ── Barcode row (index 6) — encodes Store Location ────────────────────────
-    ri  = 6
+    # ── Barcode row (index 7) — encodes Store Location ────────────────────────
+    ri  = 7
     ry  = row_tops[ri]
     rh  = ROWS[ri]
 
     c.line(BOX_X, ry + rh, BOX_X + BOX_W, ry + rh)
 
     # Use raw store location for barcode; fall back to part_no then grn_no
-    bc_data = store_loc_raw.strip() if store_loc_raw and store_loc_raw.strip() else \
-              (part_no if part_no else (grn_no if grn_no else "NO-DATA"))
+    bc_data = (store_loc_raw.strip() if store_loc_raw and store_loc_raw.strip()
+               else (part_no if part_no else (grn_no if grn_no else "NO-DATA")))
 
     pad     = 0.5 * cm
     avail_w = BOX_W - 2 * pad
@@ -217,14 +224,15 @@ def find_col(cols, *kw_groups, fallback=None):
 def generate_sticker_labels(df_grn, df_loc):
     """
     df_grn  — File 1: GRN Date, GRN No, Part No, Description, Quantity
-    df_loc  — File 2: Part No, Part Description, Store Location
+    df_loc  — File 2: Part No, Part Description, Store Location, UOM
     Merge on Part No, then generate one sticker per row of df_grn.
     """
 
     # ── Normalise column names ────────────────────────────────────────────────
     def norm_cols(df):
         df = df.copy()
-        df.columns = [c.upper().strip() if isinstance(c, str) else c for c in df.columns]
+        df.columns = [c.upper().strip() if isinstance(c, str) else c
+                      for c in df.columns]
         return df
 
     df_grn = norm_cols(df_grn)
@@ -250,17 +258,23 @@ def generate_sticker_labels(df_grn, df_loc):
     store_loc_col = find_col(l_cols, ['STORE','LOC'], 'STORELOCATION',
                               'STORE_LOCATION', 'LOCATION', 'LOC',
                               fallback=l_cols[-1] if l_cols else None)
+    uom_col       = find_col(l_cols, 'UOM', 'UNIT OF MEASURE', 'UNIT',
+                              fallback=None)
 
-    # ── Build lookup: part_no → store_location ────────────────────────────────
-    loc_lookup = {}
-    if store_loc_col:
-        for _, row in df_loc.iterrows():
-            pn = str(row[part_no_col2]).strip() if pd.notna(row[part_no_col2]) else ''
-            sl = str(row[store_loc_col]).strip() if pd.notna(row[store_loc_col]) else ''
-            if pn:
-                loc_lookup[pn] = sl
-                loc_lookup[pn.upper()] = sl
-                loc_lookup[pn.lower()] = sl
+    # ── Build lookup: part_no → (store_location, uom) ────────────────────────
+    loc_lookup = {}   # part_no → store_location string
+    uom_lookup = {}   # part_no → uom string
+
+    for _, row in df_loc.iterrows():
+        pn = str(row[part_no_col2]).strip() if pd.notna(row[part_no_col2]) else ''
+        sl = (str(row[store_loc_col]).strip()
+              if store_loc_col and pd.notna(row[store_loc_col]) else '')
+        um = (str(row[uom_col]).strip()
+              if uom_col and pd.notna(row[uom_col]) else '')
+        if pn:
+            for key in (pn, pn.upper(), pn.lower()):
+                loc_lookup[key] = sl
+                uom_lookup[key] = um
 
     # ── Create PDF ────────────────────────────────────────────────────────────
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
@@ -290,14 +304,20 @@ def generate_sticker_labels(df_grn, df_loc):
         desc     = get(row, desc_col1)
         qty      = get(row, qty_col) if qty_col else ''
 
-        # Look up store location from File 2 by matching Part No
+        # Look up store location and UOM from File 2 by matching Part No
         store_loc_raw = (loc_lookup.get(part_no)
                          or loc_lookup.get(part_no.upper())
                          or loc_lookup.get(part_no.lower())
                          or '')
+        uom = (uom_lookup.get(part_no)
+               or uom_lookup.get(part_no.upper())
+               or uom_lookup.get(part_no.lower())
+               or '')
+
         loc_parts = parse_location(store_loc_raw)
 
-        draw_sticker(c, grn_no, grn_date, part_no, desc, qty, loc_parts, store_loc_raw)
+        draw_sticker(c, grn_no, grn_date, part_no, desc, qty, uom,
+                     loc_parts, store_loc_raw)
         c.showPage()
 
     c.save()
@@ -338,7 +358,7 @@ def main():
 
         st.subheader("File 2 — Store Location Master")
         file2 = st.file_uploader(
-            "Upload Location file (Excel / CSV)  ·  columns: Part No, Part Description, Store Location",
+            "Upload Location file (Excel / CSV)  ·  columns: Part No, Part Description, Store Location, UOM",
             type=['xlsx', 'xls', 'csv'],
             key="file2",
         )
@@ -418,7 +438,7 @@ def main():
 **How to use:**
 1. Upload **File 1** — GRN data
 2. Upload **File 2** — Store Location master
-3. The app matches on **Part No** to fill Store Location
+3. The app matches on **Part No** to fill Store Location & UOM
 4. Click **Generate Sticker Labels**
 5. Download the PDF
 
@@ -433,6 +453,7 @@ def main():
 - Part No. / Part Number
 - Part Description
 - Store Location
+- UOM / Unit / Unit of Measure
 
 **Label layout (top → bottom):**
 1. GRN No.
@@ -440,8 +461,9 @@ def main():
 3. Part No.
 4. Description
 5. Quantity
-6. Store Location (4-box grid)
-7. Barcode (Code-128, **encodes Store Location**)
+6. UOM
+7. Store Location (4-box grid)
+8. Barcode (Code-128, **encodes Store Location**)
 """)
 
         st.header("⚙️ Layout")
@@ -449,9 +471,10 @@ def main():
 **Fixed configuration:**
 - Sticker page  : 10 × 15 cm
 - Content box   : 9.6 × 7.5 cm
-- All white background
+- 8 rows, all white background
 - Pure canvas drawing — no overflow possible
 - Barcode: Code-128, encodes **Store Location**
+- UOM looked up from File 2 by Part No
 """)
 
 
