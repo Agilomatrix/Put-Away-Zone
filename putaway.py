@@ -145,24 +145,28 @@ def draw_sticker(c, grn_no, grn_date, part_no, desc, qty, uom,
 
         draw_left_text(c, label, BOX_X, ry, LABEL_W, rh, F_LABEL, bold=True)
 
-        # All value cells are left-aligned
-        draw_left_text(c, value, BOX_X + LABEL_W, ry, VALUE_W, rh, vsize, bold=vbold)
+        if ri == 3:
+            draw_wrapped_centered(c, value, BOX_X + LABEL_W, ry, VALUE_W, rh, vsize)
+        else:
+            draw_centered_text(c, value, BOX_X + LABEL_W, ry, VALUE_W, rh,
+                               None, vsize, bold=vbold)
 
-    # ── Store Location row (index 6) — full width, no column divider ──────────
+    # ── Store Location row (index 6) ──────────────────────────────────────────
     ri  = 6
     ry  = row_tops[ri]
     rh  = ROWS[ri]
 
     c.line(BOX_X, ry + rh, BOX_X + BOX_W, ry + rh)
-    # No vertical divider — Store Location value spans the full box width
+    c.line(BOX_X + LABEL_W, ry, BOX_X + LABEL_W, ry + rh)
 
-    # Draw the 4-part location value left-aligned across equal sub-boxes
-    loc_box_w = BOX_W / 4
+    draw_left_text(c, "Store Location", BOX_X, ry, LABEL_W, rh, F_LABEL, bold=True)
+
+    loc_box_w = VALUE_W / 4
     for i, part in enumerate(loc_parts):
-        lx = BOX_X + i * loc_box_w
+        lx = BOX_X + LABEL_W + i * loc_box_w
         if i > 0:
             c.line(lx, ry, lx, ry + rh)
-        draw_left_text(c, part, lx, ry, loc_box_w, rh, F_LOC_VAL, bold=True)
+        draw_centered_text(c, part, lx, ry, loc_box_w, rh, None, F_LOC_VAL, bold=True)
 
     # ── Barcode row (index 7) — encodes Store Location ────────────────────────
     ri  = 7
